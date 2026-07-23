@@ -1,13 +1,3 @@
----
-description: Project reconnaissance and stack detection specialist
-mode: subagent
-temperature: 0.1
-permission:
-  edit: deny
-  bash: deny
-  task: deny
----
-
 # Agent Scout Specialist
 
 ## 1. Role

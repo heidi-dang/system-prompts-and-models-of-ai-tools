@@ -65,10 +65,46 @@ Installs into `.opencode/agents/` in the current directory.
 ./agent.sh --both
 ```
 
+### Legacy paths
+
+Some OpenCode versions use `agent/` (singular). Install to both official and legacy paths:
+
+```bash
+./agent.sh --both --legacy
+```
+
+### JSON config fallback
+
+If agent markdown files alone are not enough, register agents in the OpenCode JSON config:
+
+```bash
+# Project-level
+./agent.sh --config-project
+
+# Global-level
+./agent.sh --config-global
+```
+
+### Max compatibility (repair)
+
+Run all install paths, JSON config, and diagnostics:
+
+```bash
+./agent.sh --repair
+```
+
+### Set default agent
+
+```bash
+./agent.sh --default heidi --config-project
+./agent.sh --default heidi --config-global
+```
+
 ### Diagnostics
 
 ```bash
 ./agent.sh --check
+./agent.sh --doctor
 ```
 
 ### Override config directory
@@ -76,6 +112,35 @@ Installs into `.opencode/agents/` in the current directory.
 ```bash
 OPENCODE_CONFIG_DIR=/custom/path ./agent.sh --global
 ```
+
+## Troubleshooting
+
+If the custom agents do not appear in the OpenCode web UI after installation:
+
+1. **Check if files are installed:**
+   ```bash
+   ./agent.sh --check
+   ```
+
+2. **Run runtime diagnostics:**
+   ```bash
+   ./agent.sh --doctor
+   ```
+   This shows the opencode binary path, version, all agent directories, and whether `opencode agent list` finds the custom agents.
+
+3. **Run full repair:**
+   ```bash
+   ./agent.sh --repair
+   ```
+   This installs to all paths, writes JSON config, and runs diagnostics.
+
+4. **Understand the discovery chain:**
+   - `Build` and `Plan` are built-in agents — they always appear.
+   - Custom agents should appear after OpenCode reloads its agent registry.
+   - If agent files exist but `opencode agent list` does **not** show them → run `./agent.sh --repair`.
+   - If `opencode agent list` shows them but the web UI does **not** → the current web session is stale or running from a different server/user/project. Start a new OpenCode session from the same project folder.
+
+5. **Project install note:** `--project` and `--config-project` install relative to the current directory where `agent.sh` is run. Make sure to run it from the same project folder you open in OpenCode.
 
 ## What is not affected
 

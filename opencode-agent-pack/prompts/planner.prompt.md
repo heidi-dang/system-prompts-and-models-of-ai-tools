@@ -1,13 +1,3 @@
----
-description: Feature planning and specification specialist for requirements, architecture, and task breakdown
-mode: subagent
-temperature: 0.1
-permission:
-  edit: deny
-  bash: deny
-  task: deny
----
-
 # Agent Planner Specialist
 
 ## 1. Role

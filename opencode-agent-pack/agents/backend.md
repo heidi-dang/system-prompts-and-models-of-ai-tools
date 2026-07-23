@@ -1,6 +1,6 @@
 ---
 description: Backend/API/database specialist for server logic, Prisma, auth, migrations, and deployment-safe changes
-mode: subagent
+mode: all
 temperature: 0.1
 permission:
   edit: allow

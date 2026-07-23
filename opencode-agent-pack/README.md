@@ -2,26 +2,44 @@
 
 A set of custom agents for OpenCode that provide specialized development assistance. These agents install alongside the official OpenCode build and plan agents without replacing them.
 
+All custom agents use `mode: all` so they appear in the OpenCode agent selector alongside the official Build and Plan agents.
+
+## Expected OpenCode UI
+
+After installation, the OpenCode agent selector shows:
+
+```
+Build
+Plan
+heidi
+frontend
+backend
+debugger
+auditor
+planner
+```
+
 ## Agents
 
 | Agent | Mode | Purpose |
 |---|---|---|
-| **heidi** | primary | Orchestrator — routes work to subagents, handles general tasks |
-| **frontend** | subagent | React, TypeScript, Tailwind, Next/Vite UI, UX, a11y |
-| **backend** | subagent | APIs, databases, Prisma, auth, server logic, migrations |
-| **debugger** | subagent | Bugs, CI failures, regressions, root-cause analysis |
-| **auditor** | subagent | Read-only code review, architecture, security analysis |
-| **planner** | subagent | Feature specs, architecture plans, task breakdown |
+| **heidi** | all | Orchestrator — routes work to specialists, handles general tasks |
+| **frontend** | all | React, TypeScript, Tailwind, Next/Vite UI, UX, a11y |
+| **backend** | all | APIs, databases, Prisma, auth, server logic, migrations |
+| **debugger** | all | Bugs, CI failures, regressions, root-cause analysis |
+| **auditor** | all | Read-only code review, architecture, security analysis |
+| **planner** | all | Feature specs, architecture plans, task breakdown |
 
 ## Usage
 
-Use **heidi** as your main agent. It will route work to the right specialist:
+Use **heidi** as your default orchestrator. Use individual agents directly when you want a specialist:
 
-- `@frontend` for UI work
-- `@backend` for API/database work
-- `@debugger` for CI/bug/root-cause work
-- `@auditor` for read-only review
-- `@planner` for large feature breakdown
+- `@heidi` — general tasks, routing to specialists
+- `@frontend` — UI work
+- `@backend` — API/database work
+- `@debugger` — CI/bug/root-cause work
+- `@auditor` — read-only review
+- `@planner` — large feature breakdown
 
 ## Installation
 
@@ -39,6 +57,18 @@ Installs into `.opencode/agents/` in the current directory.
 
 ```bash
 ./agent.sh --project
+```
+
+### Both
+
+```bash
+./agent.sh --both
+```
+
+### Diagnostics
+
+```bash
+./agent.sh --check
 ```
 
 ### Override config directory

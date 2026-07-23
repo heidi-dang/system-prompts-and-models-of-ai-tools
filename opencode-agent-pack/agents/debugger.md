@@ -1,6 +1,6 @@
 ---
 description: Debugging and root-cause analysis specialist for bugs, CI failures, regressions, and broken builds
-mode: subagent
+mode: all
 temperature: 0.1
 permission:
   edit: allow

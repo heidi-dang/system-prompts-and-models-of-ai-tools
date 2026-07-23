@@ -1,6 +1,6 @@
 ---
 description: Frontend/UI specialist for React, TypeScript, Tailwind, Next.js, Vite, UX polish, and component architecture
-mode: subagent
+mode: all
 temperature: 0.2
 permission:
   edit: allow

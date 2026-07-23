@@ -1,6 +1,6 @@
 ---
 description: Feature planning and specification specialist for requirements, architecture, and task breakdown
-mode: subagent
+mode: all
 temperature: 0.1
 permission:
   edit: deny

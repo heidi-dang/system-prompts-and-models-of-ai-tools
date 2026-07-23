@@ -53,8 +53,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install OpenCode
         run: |
-          curl -fsSL https://opencode.ai/install.sh | bash
+          curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+      - name: Verify OpenCode installed
+        id: check_opencode
+        run: |
+          if command -v opencode &>/dev/null || [ -f "$HOME/.opencode/bin/opencode" ]; then
+            echo "installed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "OpenCode installation failed (URL may have moved)"
+          fi
       - name: Install agents globally
         run: |
           export OPENCODE_CONFIG_DIR="$HOME/.config/opencode"

@@ -32,6 +32,16 @@ jobs:
         run: python3 tests/validate_agents.py
       - name: Validate memory utility
         run: python3 -m unittest tests.test_memory -v
+      - name: Context memory tests
+        run: python3 -m unittest tests.test_context_memory -v
+      - name: Task ledger tests
+        run: python3 -m unittest tests.test_task_ledger -v
+      - name: Strategy selector tests
+        run: python3 -m unittest tests.test_strategy_selector -v
+      - name: Prompt proposals tests
+        run: python3 -m unittest tests.test_prompt_proposals -v
+      - name: Proactive audit tests
+        run: python3 -m unittest tests.test_proactive_audit -v
 
   installer:
     name: Installer tests

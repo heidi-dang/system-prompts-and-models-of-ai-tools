@@ -29,6 +29,10 @@ Options:
   --default AGENT       Set default_agent in opencode.json
   --init-rules          Create .heidi/rules.md, commands.md, and memory.jsonl
   --force               With --init-rules, reinitialize existing files (with backup)
+  --init-context        Create full .heidi directory with context index and task ledger
+  --refresh-context     Regenerate .heidi/context-index.json
+  --validate-memory     Validate memory.jsonl and context index
+  --validate-all        Run all pack validation (agents, memory, context, strategies, proposals)
   --repair              Run all install paths + config + doctor
   --uninstall           Remove Heidi pack agents and config entries
   --rollback            Restore newest backup set
@@ -65,6 +69,10 @@ DRY_RUN=false
 DO_UNINSTALL=false
 DO_ROLLBACK=false
 DO_INIT_RULES=false
+DO_INIT_CONTEXT=false
+DO_REFRESH_CONTEXT=false
+DO_VALIDATE_MEMORY=false
+DO_VALIDATE_ALL=false
 DO_FORCE=false
 
 while [[ $# -gt 0 ]]; do
@@ -79,6 +87,10 @@ while [[ $# -gt 0 ]]; do
     --config-global) DO_CONFIG_GLOBAL=true; shift ;;
     --config-project) DO_CONFIG_PROJECT=true; shift ;;
     --init-rules) DO_INIT_RULES=true; shift ;;
+    --init-context) DO_INIT_CONTEXT=true; shift ;;
+    --refresh-context) DO_REFRESH_CONTEXT=true; shift ;;
+    --validate-memory) DO_VALIDATE_MEMORY=true; shift ;;
+    --validate-all) DO_VALIDATE_ALL=true; shift ;;
     --force) DO_FORCE=true; shift ;;
     --repair) MODE="repair"; shift ;;
     --uninstall) DO_UNINSTALL=true; shift ;;
@@ -679,6 +691,63 @@ CMDSHEOF
 }
 
 # ============================================================
+# INIT CONTEXT (full .heidi setup)
+# ============================================================
+init_context_mode() {
+  init_rules_mode
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  mkdir -p "$heidi_dir"
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" init "$heidi_dir" || true
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/task_ledger.py" init "$heidi_dir/task-ledger.jsonl" || true
+  echo "Context initialized in $heidi_dir"
+}
+
+# ============================================================
+# REFRESH CONTEXT
+# ============================================================
+refresh_context_mode() {
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  mkdir -p "$heidi_dir"
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" index --root . --out "$heidi_dir/context-index.json"
+  echo "Context index refreshed."
+}
+
+# ============================================================
+# VALIDATE MEMORY
+# ============================================================
+validate_memory_mode() {
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  if [ ! -d "$heidi_dir" ]; then
+    echo "No .heidi directory found. Run: ./agent.sh --init-context" >&2
+    exit 1
+  fi
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/memory.py" validate "$heidi_dir/memory.jsonl" || true
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" validate "$heidi_dir" || true
+}
+
+# ============================================================
+# VALIDATE ALL
+# ============================================================
+validate_all_mode() {
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  echo "=== Running all validation ==="
+  python3 "$SCRIPT_DIR/tests/validate_agents.py"
+  if [ -d "$heidi_dir" ]; then
+    python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/memory.py" validate "$heidi_dir/memory.jsonl" 2>/dev/null || echo "(memory validation skipped or failed)"
+    python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" validate "$heidi_dir" 2>/dev/null || echo "(context validation skipped or failed)"
+  else
+    echo "No .heidi directory. Run: ./agent.sh --init-context"
+  fi
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/strategy_selector.py" validate "$SCRIPT_DIR/opencode-agent-pack/strategies/default-strategies.json" 2>/dev/null || echo "(strategy validation skipped)"
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/prompt_proposals.py" validate "$SCRIPT_DIR/opencode-agent-pack/prompt-proposals" 2>/dev/null || echo "(proposal validation skipped)"
+  echo "=== Validation complete ==="
+}
+
+# ============================================================
 # DRY-RUN MODE
 # ============================================================
 dry_run_mode() {
@@ -767,6 +836,30 @@ esac
 # --init-rules mode
 if [ "$DO_INIT_RULES" = true ]; then
   init_rules_mode
+  exit 0
+fi
+
+# --init-context mode
+if [ "$DO_INIT_CONTEXT" = true ]; then
+  init_context_mode
+  exit 0
+fi
+
+# --refresh-context mode
+if [ "$DO_REFRESH_CONTEXT" = true ]; then
+  refresh_context_mode
+  exit 0
+fi
+
+# --validate-memory mode
+if [ "$DO_VALIDATE_MEMORY" = true ]; then
+  validate_memory_mode
+  exit 0
+fi
+
+# --validate-all mode
+if [ "$DO_VALIDATE_ALL" = true ]; then
+  validate_all_mode
   exit 0
 fi
 

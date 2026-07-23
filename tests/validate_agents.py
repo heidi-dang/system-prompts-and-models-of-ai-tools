@@ -16,6 +16,9 @@ Asserts:
 - No restart/reboot/shutdown patterns
 - No broad Bash command prefixes on read-only agents
 - No duplicate agent identifiers
+- Heidi contains orchestration rules (Phase 5)
+- Specialists contain Handoff Boundary (Phase 5)
+- No specialist instructs spawning/invoking other agents
 """
 
 import os
@@ -142,6 +145,56 @@ def main():
             if pos in seen_positions:
                 die(f"{name}: duplicate @ reference at position {pos}")
             seen_positions.add(pos)
+
+    # ── Phase 5: Orchestration rules (heidi.md) ──
+    heidi_path = os.path.join(AGENTS_DIR, "heidi.md")
+    if os.path.exists(heidi_path):
+        heidi_content = open(heidi_path).read()
+        # Must contain orchestration patterns
+        for pattern in [
+            "Dynamic Subagent Orchestration",
+            "Automatic delegation depth is exactly 1",
+            "Parallel Execution Rules",
+            "Handoff Protocol",
+            "Forbidden Orchestration Patterns",
+            "parallel_independent",
+            "file ownership",
+            "ownership boundary",
+            "Do not use",
+            "recursive delegation",
+            "specialist-to-specialist spawning",
+        ]:
+            if pattern not in heidi_content and pattern.lower() not in heidi_content.lower():
+                die(f"heidi: missing orchestration content: '{pattern}'")
+        # Must contain the task tool identifier rule
+        if "Task tool identifier rule" not in heidi_content:
+            die("heidi: missing Task tool identifier rule section")
+        if "Correct:\n- scout\n- frontend\n- backend\n- debugger\n- auditor\n- planner" not in heidi_content:
+            die("heidi: missing correct task agent identifiers list")
+        if "Incorrect:" not in heidi_content:
+            die("heidi: missing incorrect task agent identifiers list")
+
+    # ── Phase 5: Specialist handoff boundary ──
+    for name in sorted(AGENT_NAMES):
+        if name == "heidi":
+            continue
+        fpath = os.path.join(AGENTS_DIR, f"{name}.md")
+        content = open(fpath).read()
+        if "Handoff Boundary" not in content:
+            die(f"{name}: missing Handoff Boundary section")
+        if "Do not spawn or invoke other agents" not in content:
+            die(f"{name}: missing spawn prohibition")
+        if "Recommended Handoff" not in content:
+            die(f"{name}: missing Recommended Handoff section")
+        # Check for spawn/invoke/delegate instructions to other agents
+        spawn_patterns = [
+            (r'^\s*spawn\s+.*agent', "spawn instruction as directive"),
+            (r'invoke @(\w+)', "invoke @agent reference"),
+            (r'delegate to @(\w+)', "delegate to @agent"),
+        ]
+        for pat, desc in spawn_patterns:
+            if re.search(pat, content, re.IGNORECASE | re.MULTILINE):
+                die(f"{name}: forbidden {desc}")
 
     # Final report
     if errors:

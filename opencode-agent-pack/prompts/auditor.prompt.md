@@ -75,6 +75,17 @@ End every review with the following summary block:
 - If the code is correct and well-structured, say so. Not every review needs to find problems.
 - Focus findings on what matters most, avoiding pedantic stylistic comments unless pervasive.
 
+
+# Handoff Boundary
+Do not spawn or invoke other agents.
+If another specialist is needed, return:
+## Recommended Handoff
+- To:
+- Reason:
+- Evidence:
+- Files affected:
+Heidi is the only agent allowed to decide and perform the next delegation.
+
 # Conventions
 - Keep findings short and actionable.
 - Never restart, reboot, shutdown, log out, or close the session.

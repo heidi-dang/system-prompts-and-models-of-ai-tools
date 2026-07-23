@@ -78,6 +78,17 @@ When presenting your findings and fix, use the following format:
 [FIXED | PARTIALLY_FIXED: what remains | BLOCKED: reason | ESCALATING: why]
 ```
 
+
+# Handoff Boundary
+Do not spawn or invoke other agents.
+If another specialist is needed, return:
+## Recommended Handoff
+- To:
+- Reason:
+- Evidence:
+- Files affected:
+Heidi is the only agent allowed to decide and perform the next delegation.
+
 # Conventions
 - Always inspect the repo and relevant files before editing.
 - Prefer and match existing code conventions.

@@ -250,4 +250,77 @@ assert 'agents' not in cfg, 'deprecated agents key'
 print('OK')
 " && pass || fail "config uses wrong key"
 
+# ------------------------------------------------------------------
+echo "=== 21. --install creates project agents ==="
+TMPI="$TEST_ROOT/install_test"
+mkdir -p "$TMPI"
+cp agent.sh "$TMPI/"
+cp -r opencode-agent-pack "$TMPI/"
+run_checked "install1" bash -c "cd '$TMPI' && bash agent.sh --install"
+COUNT=0
+for a in heidi frontend backend debugger auditor planner scout; do
+  [ -f "$TMPI/.opencode/agents/$a.md" ] && COUNT=$((COUNT + 1))
+done
+[ "$COUNT" -eq 7 ] && pass || fail "--install: $COUNT/7 agents"
+
+# ------------------------------------------------------------------
+echo "=== 22. --install creates project config ==="
+[ -f "$TMPI/opencode.json" ] && pass || fail "--install: no opencode.json"
+
+# ------------------------------------------------------------------
+echo "=== 23. --install config uses agent not agents ==="
+python3 -c "
+import json
+cfg = json.load(open('$TMPI/opencode.json'))
+assert 'agent' in cfg, 'no agent key'
+assert 'agents' not in cfg, 'deprecated agents key'
+print('OK')
+" && pass || fail "--install config uses wrong key"
+
+# ------------------------------------------------------------------
+echo "=== 24. --install creates .heidi files ==="
+ALL_OK=true
+for f in rules.md commands.md memory.jsonl context-index.json task-ledger.jsonl proactive-audit-report.md; do
+  [ -f "$TMPI/.heidi/$f" ] || { ALL_OK=false; echo "  missing .heidi/$f"; }
+done
+[ "$ALL_OK" = true ] && pass || fail "--install: missing .heidi files"
+
+# ------------------------------------------------------------------
+echo "=== 25. --install outputs Status: READY ==="
+run_checked "install_stdout" bash -c "cd '$TMPI' && bash agent.sh --install"
+grep -q "Status: READY" "$OUTDIR/install_stdout.stdout" && pass || fail "--install: no Status: READY"
+
+# ------------------------------------------------------------------
+echo "=== 26. Repeated --install idempotent ==="
+run_checked "install_repeat" bash -c "cd '$TMPI' && bash agent.sh --install"
+[ -f "$TMPI/.opencode/agents/heidi.md" ] && pass || fail "repeated --install broke agents"
+
+# ------------------------------------------------------------------
+echo "=== 27. --install --global installs globally ==="
+export OPENCODE_CONFIG_DIR="$TEST_ROOT/global_install"
+rm -rf "$OPENCODE_CONFIG_DIR"
+mkdir -p "$OPENCODE_CONFIG_DIR"
+run_checked "install_global" bash agent.sh --install --global
+HEIDI_OK=false
+[ -f "$OPENCODE_CONFIG_DIR/agents/heidi.md" ] && HEIDI_OK=true
+CONFIG_OK=false
+[ -f "$OPENCODE_CONFIG_DIR/opencode.json" ] && CONFIG_OK=true
+[ "$HEIDI_OK" = true ] && [ "$CONFIG_OK" = true ] && pass || fail "--install --global: heidi=$HEIDI_OK config=$CONFIG_OK"
+
+# ------------------------------------------------------------------
+echo "=== 28. --install preserves unrelated config keys ==="
+export OPENCODE_CONFIG_DIR="$TEST_ROOT/preserve_install"
+rm -rf "$OPENCODE_CONFIG_DIR"
+mkdir -p "$OPENCODE_CONFIG_DIR"
+cat > "$OPENCODE_CONFIG_DIR/opencode.json" <<'JSON'
+{"$schema":"https://opencode.ai/config.json","agent":{"custom":{"description":"my agent","mode":"all"}}}
+JSON
+run_checked "preserve_install" bash agent.sh --install --global
+python3 -c "
+import json
+cfg = json.load(open('$OPENCODE_CONFIG_DIR/opencode.json'))
+assert 'custom' in cfg['agent'], 'custom agent lost'
+print('OK')
+" && pass || fail "--install global lost custom agent"
+
 summary

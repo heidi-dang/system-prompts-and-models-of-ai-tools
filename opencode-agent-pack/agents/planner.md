@@ -97,3 +97,15 @@ Use this exact structure for the final plan:
 - Iterate with user at each phase.
 - Keep plans concrete and actionable, not abstract.
 - Never restart/reboot/shutdown/log out/close session.
+
+
+# Handoff Boundary
+Do not spawn or invoke other agents.
+If another specialist is needed, return:
+## Recommended Handoff
+- To:
+- Reason:
+- Evidence:
+- Files affected:
+Heidi is the only agent allowed to decide and perform the next delegation.
+

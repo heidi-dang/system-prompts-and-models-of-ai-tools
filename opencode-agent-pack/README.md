@@ -65,6 +65,26 @@ Every agent in this pack follows these design principles:
 4. **Structured Output** — Consistent response formats (What I Did / Files Changed / Verification / Status).
 5. **Project Discovery** — Detect the project stack from config files. Never assume React/TypeScript/Tailwind.
 6. **Self-Compliance** — The orchestrator self-audits after each action.
+7. **Project Rules & Memory** — All agents inspect `.heidi/rules.md` for repository constraints and auto-record learnings.
+
+## Project Rules & Persistent Memory System (`.heidi/rules.md`)
+
+This agent pack features a living memory system for your repository:
+
+* **Command Registry**: Defines exact `Typecheck`, `Lint`, `Test`, and `Build` commands so agents never guess scripts.
+* **Architecture Constraints**: Records framework, styling, state management, and DB/ORM rules.
+* **Gotchas & Anti-Patterns**: Documents repository-specific forbidden patterns.
+* **🧠 Auto-Learning Memory Protocol**: When `@heidi` or specialists fix a non-obvious bug, uncover a build/test gotcha, or receive user preferences, they automatically append a persistent rule to `## 🧠 Agent Memory & Past Learnings` in `.heidi/rules.md`.
+
+### Initialize Project Rules
+
+To generate a pre-populated `.heidi/rules.md` template in your workspace:
+
+```bash
+./agent.sh --init-rules
+```
+
+If `.heidi/rules.md` does not exist when `@scout` inspects a project, `@scout` will automatically draft a pre-populated template in its output report.
 
 ## Usage
 

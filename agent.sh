@@ -379,6 +379,10 @@ write_json_config() {
 # ============================================================
 # MAIN LOGIC
 # ============================================================
+OFFICIAL_GLOBAL="$CONFIG_DIR/agents"
+OFFICIAL_PROJECT="$(pwd)/.opencode/agents"
+LEGACY_GLOBAL="$CONFIG_DIR/agent"
+LEGACY_PROJECT="$(pwd)/.opencode/agent"
 
 # ============================================================
 # DRY-RUN MODE

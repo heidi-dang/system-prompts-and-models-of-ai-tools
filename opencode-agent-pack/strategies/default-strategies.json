@@ -1,0 +1,58 @@
+{
+  "strategies": {
+    "direct_single_agent": {
+      "description": "Handle task directly without delegation",
+      "agents": ["heidi"],
+      "parallelizable": false,
+      "requires_approval": false
+    },
+    "scout_then_execute": {
+      "description": "Run scout first, then execute based on findings",
+      "agents": ["scout"],
+      "parallelizable": false,
+      "requires_approval": false
+    },
+    "planner_then_execute": {
+      "description": "Plan first, then execute the plan",
+      "agents": ["planner"],
+      "parallelizable": false,
+      "requires_approval": true
+    },
+    "debugger_root_cause": {
+      "description": "Root-cause analysis with debugger then specialist fix",
+      "agents": ["debugger", "auditor"],
+      "parallelizable": false,
+      "requires_approval": false
+    },
+    "frontend_backend_parallel": {
+      "description": "Parallel frontend and backend development",
+      "agents": ["frontend", "backend"],
+      "parallelizable": true,
+      "requires_approval": false
+    },
+    "audit_only": {
+      "description": "Read-only audit and review",
+      "agents": ["auditor"],
+      "parallelizable": false,
+      "requires_approval": true
+    },
+    "prompt_improvement_proposal": {
+      "description": "Create a prompt improvement proposal",
+      "agents": ["auditor", "heidi"],
+      "parallelizable": false,
+      "requires_approval": true
+    },
+    "proactive_audit": {
+      "description": "Run proactive audit checks",
+      "agents": ["auditor"],
+      "parallelizable": false,
+      "requires_approval": true
+    },
+    "planner_gate": {
+      "description": "Planner reviews plan before execution",
+      "agents": ["planner"],
+      "parallelizable": false,
+      "requires_approval": true
+    }
+  }
+}

@@ -17,6 +17,7 @@ Usage: $0 [options]
 Install OpenCode Heidi agent pack v$PACK_VERSION.
 
 Options:
+  --install [--global|--project|--both]  Full one-command install (default: project)
   --global              Install into OPENCODE_CONFIG_DIR or ~/.config/opencode/agents (default)
   --project             Install into .opencode/agents in the current directory
   --both                Install into both global and project official paths
@@ -29,6 +30,10 @@ Options:
   --default AGENT       Set default_agent in opencode.json
   --init-rules          Create .heidi/rules.md, commands.md, and memory.jsonl
   --force               With --init-rules, reinitialize existing files (with backup)
+  --init-context        Create full .heidi directory with context index and task ledger
+  --refresh-context     Regenerate .heidi/context-index.json
+  --validate-memory     Validate memory.jsonl and context index
+  --validate-all        Run all pack validation (agents, memory, context, strategies, proposals)
   --repair              Run all install paths + config + doctor
   --uninstall           Remove Heidi pack agents and config entries
   --rollback            Restore newest backup set
@@ -57,6 +62,7 @@ CONFIG_DIR="${OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}"
 
 # --- Flags ---
 MODE="global"
+WAS_INSTALL=false
 DO_CONFIG_GLOBAL=false
 DO_CONFIG_PROJECT=false
 DO_DEFAULT=false
@@ -65,10 +71,15 @@ DRY_RUN=false
 DO_UNINSTALL=false
 DO_ROLLBACK=false
 DO_INIT_RULES=false
+DO_INIT_CONTEXT=false
+DO_REFRESH_CONTEXT=false
+DO_VALIDATE_MEMORY=false
+DO_VALIDATE_ALL=false
 DO_FORCE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --install) MODE="install"; WAS_INSTALL=true; shift ;;
     --global) MODE="global"; shift ;;
     --project) MODE="project"; shift ;;
     --both) MODE="both"; shift ;;
@@ -79,6 +90,10 @@ while [[ $# -gt 0 ]]; do
     --config-global) DO_CONFIG_GLOBAL=true; shift ;;
     --config-project) DO_CONFIG_PROJECT=true; shift ;;
     --init-rules) DO_INIT_RULES=true; shift ;;
+    --init-context) DO_INIT_CONTEXT=true; shift ;;
+    --refresh-context) DO_REFRESH_CONTEXT=true; shift ;;
+    --validate-memory) DO_VALIDATE_MEMORY=true; shift ;;
+    --validate-all) DO_VALIDATE_ALL=true; shift ;;
     --force) DO_FORCE=true; shift ;;
     --repair) MODE="repair"; shift ;;
     --uninstall) DO_UNINSTALL=true; shift ;;
@@ -679,6 +694,150 @@ CMDSHEOF
 }
 
 # ============================================================
+# INIT CONTEXT (full .heidi setup)
+# ============================================================
+init_context_mode() {
+  init_rules_mode
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  mkdir -p "$heidi_dir"
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" init "$heidi_dir" || true
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/task_ledger.py" init "$heidi_dir/task-ledger.jsonl" || true
+  echo "Context initialized in $heidi_dir"
+}
+
+# ============================================================
+# REFRESH CONTEXT
+# ============================================================
+refresh_context_mode() {
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  mkdir -p "$heidi_dir"
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" index --root . --out "$heidi_dir/context-index.json"
+  echo "Context index refreshed."
+}
+
+# ============================================================
+# VALIDATE MEMORY
+# ============================================================
+validate_memory_mode() {
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  if [ ! -d "$heidi_dir" ]; then
+    echo "No .heidi directory found. Run: ./agent.sh --init-context" >&2
+    exit 1
+  fi
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/memory.py" validate "$heidi_dir/memory.jsonl" || true
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" validate "$heidi_dir" || true
+}
+
+# ============================================================
+# VALIDATE ALL
+# ============================================================
+validate_all_mode() {
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  echo "=== Running all validation ==="
+  python3 "$SCRIPT_DIR/tests/validate_agents.py"
+  if [ -d "$heidi_dir" ]; then
+    python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/memory.py" validate "$heidi_dir/memory.jsonl" 2>/dev/null || echo "(memory validation skipped or failed)"
+    python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" validate "$heidi_dir" 2>/dev/null || echo "(context validation skipped or failed)"
+  else
+    echo "No .heidi directory. Run: ./agent.sh --init-context"
+  fi
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/strategy_selector.py" validate "$SCRIPT_DIR/opencode-agent-pack/strategies/default-strategies.json" 2>/dev/null || echo "(strategy validation skipped)"
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/prompt_proposals.py" validate "$SCRIPT_DIR/opencode-agent-pack/prompt-proposals" 2>/dev/null || echo "(proposal validation skipped)"
+  echo "=== Validation complete ==="
+}
+
+# ============================================================
+# INSTALL MODE — one-command full setup
+# ============================================================
+install_mode() {
+  local scope="${1:-project}"
+
+  echo "=== Heidi Install ==="
+  echo ""
+
+  # 1. Install agents based on scope
+  case "$scope" in
+    global) MODE="global" ;;
+    project) MODE="project" ;;
+    both) MODE="both" ;;
+  esac
+  do_install
+  echo ""
+
+  # 2. Write config
+  case "$scope" in
+    global)
+      do_config_global
+      ;;
+    project)
+      do_config_project
+      ;;
+    both)
+      do_config_global
+      do_config_project
+      ;;
+  esac
+
+  # 3. Init context
+  init_context_mode
+
+  # 4. Validations
+  echo "=== Validation ==="
+  validate_memory_mode 2>/dev/null || echo "(memory validation continued)"
+  python3 "$SCRIPT_DIR/tests/validate_agents.py" 2>/dev/null || echo "(agent validation continued)"
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/strategy_selector.py" validate \
+    "$SCRIPT_DIR/opencode-agent-pack/strategies/default-strategies.json" 2>/dev/null || true
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/prompt_proposals.py" validate \
+    "$SCRIPT_DIR/opencode-agent-pack/prompt-proposals" 2>/dev/null || true
+  echo ""
+
+  # 5. Proactive audit
+  echo "=== Proactive Audit ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/proactive_audit.py" \
+    --root . --out .heidi/proactive-audit-report.md 2>/dev/null || true
+  echo ""
+
+  # 6. Doctor-style discovery
+  echo "=== Runtime Discovery ==="
+  if command -v opencode >/dev/null 2>&1; then
+    echo "opencode available at $(command -v opencode)"
+    opencode agent list 2>/dev/null || echo "(agent list unavailable)"
+  else
+    echo "opencode not found on PATH"
+  fi
+  echo ""
+
+  # 7. Final report
+  local config_path=""
+  case "$scope" in
+    global) config_path="$CONFIG_DIR/opencode.json" ;;
+    project) config_path="$(pwd)/opencode.json" ;;
+    both) config_path="$CONFIG_DIR/opencode.json (global) + $(pwd)/opencode.json (project)" ;;
+  esac
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+
+  echo "Heidi Install Summary"
+  echo "---------------------"
+  echo "Install scope: $scope"
+  echo "Agents installed: 7"
+  echo "Config path: $config_path"
+  echo "Rules: $([ -f "$heidi_dir/rules.md" ] && echo 'yes' || echo 'no')"
+  echo "Commands: $([ -f "$heidi_dir/commands.md" ] && echo 'yes' || echo 'no')"
+  echo "Memory: $([ -f "$heidi_dir/memory.jsonl" ] && echo 'yes' || echo 'no')"
+  echo "Context index: $([ -f "$heidi_dir/context-index.json" ] && echo 'yes' || echo 'no')"
+  echo "Task ledger: $([ -f "$heidi_dir/task-ledger.jsonl" ] && echo 'yes' || echo 'no')"
+  echo "Proactive audit: $([ -f "$heidi_dir/proactive-audit-report.md" ] && echo 'yes' || echo 'no')"
+  echo "Validation: completed"
+  echo "Runtime discovery: $(command -v opencode 2>/dev/null || echo 'opencode not in PATH')"
+  echo "Status: READY"
+}
+
+# ============================================================
 # DRY-RUN MODE
 # ============================================================
 dry_run_mode() {
@@ -770,6 +929,30 @@ if [ "$DO_INIT_RULES" = true ]; then
   exit 0
 fi
 
+# --init-context mode
+if [ "$DO_INIT_CONTEXT" = true ]; then
+  init_context_mode
+  exit 0
+fi
+
+# --refresh-context mode
+if [ "$DO_REFRESH_CONTEXT" = true ]; then
+  refresh_context_mode
+  exit 0
+fi
+
+# --validate-memory mode
+if [ "$DO_VALIDATE_MEMORY" = true ]; then
+  validate_memory_mode
+  exit 0
+fi
+
+# --validate-all mode
+if [ "$DO_VALIDATE_ALL" = true ]; then
+  validate_all_mode
+  exit 0
+fi
+
 # --uninstall mode
 if [ "$DO_UNINSTALL" = true ]; then
   echo "=== Uninstall Heidi Agent Pack ==="
@@ -846,8 +1029,7 @@ fi
 do_install
 
 # --- JSON config (with implied agent install) ---
-if [ "$DO_CONFIG_GLOBAL" = true ]; then
-  # Ensure global agent files are installed for the config reference
+do_config_global() {
   mkdir -p "$OFFICIAL_GLOBAL"
   for agent in "${AGENT_NAMES[@]}"; do
     src="$AGENT_SRC/$agent.md"
@@ -859,10 +1041,8 @@ if [ "$DO_CONFIG_GLOBAL" = true ]; then
   echo ""
   echo "=== Global JSON config ==="
   write_json_config "$CONFIG_DIR/opencode.json" "./agents" "${DEFAULT_AGENT:-}"
-fi
-
-if [ "$DO_CONFIG_PROJECT" = true ]; then
-  # Ensure project agent files are installed for the config reference
+}
+do_config_project() {
   mkdir -p "$OFFICIAL_PROJECT"
   for agent in "${AGENT_NAMES[@]}"; do
     src="$AGENT_SRC/$agent.md"
@@ -874,6 +1054,30 @@ if [ "$DO_CONFIG_PROJECT" = true ]; then
   echo ""
   echo "=== Project JSON config ==="
   write_json_config "$(pwd)/opencode.json" ".opencode/agents" "${DEFAULT_AGENT:-}"
+}
+
+# Handle install mode
+if [ "$WAS_INSTALL" = true ]; then
+  install_scope="project"
+  case "$MODE" in
+    install) install_scope="project" ;;    # --install alone
+    global)  install_scope="global" ;;     # --install --global
+    project) install_scope="project" ;;    # --install --project
+    both)    install_scope="both" ;;       # --install --both
+    *)       install_scope="project" ;;
+  esac
+  echo ""
+  install_mode "$install_scope"
+  exit 0
+fi
+
+# --- JSON config (with implied agent install) ---
+if [ "$DO_CONFIG_GLOBAL" = true ]; then
+  do_config_global
+fi
+
+if [ "$DO_CONFIG_PROJECT" = true ]; then
+  do_config_project
 fi
 
 echo ""

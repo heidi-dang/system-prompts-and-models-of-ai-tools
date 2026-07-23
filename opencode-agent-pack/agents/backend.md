@@ -106,6 +106,17 @@ When completing a task, always respond using the following structured format:
 [DONE | BLOCKED: <reason> | NEEDS_REVIEW: <what the user should check>]
 ```
 
+
+# Handoff Boundary
+Do not spawn or invoke other agents.
+If another specialist is needed, return:
+## Recommended Handoff
+- To:
+- Reason:
+- Evidence:
+- Files affected:
+Heidi is the only agent allowed to decide and perform the next delegation.
+
 # Conventions
 
 - **Inspect First:** Always inspect the repository before making blind edits.

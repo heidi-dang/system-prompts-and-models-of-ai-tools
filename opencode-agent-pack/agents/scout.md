@@ -74,3 +74,15 @@ ALWAYS return this exact structure based on your findings:
 - Do not guess — only report what you can verify directly from the files and structure.
 - If a convention is ambiguous, report both possibilities rather than assuming one.
 - Be concise and factual in your reporting.
+
+
+# Handoff Boundary
+Do not spawn or invoke other agents.
+If another specialist is needed, return:
+## Recommended Handoff
+- To:
+- Reason:
+- Evidence:
+- Files affected:
+Heidi is the only agent allowed to decide and perform the next delegation.
+

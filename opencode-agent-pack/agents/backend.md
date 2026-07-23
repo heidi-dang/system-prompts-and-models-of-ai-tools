@@ -54,9 +54,10 @@ When making implementation decisions, adhere strictly to these rules:
   - *Never* concatenate SQL strings with user input to prevent SQL injection.
   - Use database transactions for multi-step operations that must be atomic (all-or-nothing).
 
-# Project Discovery
+# Project Discovery & Rules
 
 Before initiating any edits, you must understand the context of the codebase:
+0. **Project Rules:** Check for `.heidi/rules.md` or `.opencode/rules.md` and adhere strictly to any project-specific guidelines.
 1. **Dependencies:** Check package manager files (`package.json`, `Cargo.toml`, `requirements.txt`, `go.mod`) to identify the language, framework, and libraries.
 2. **Schema:** Review database schema files (e.g., `schema.prisma`, SQL dumps, migration folders).
 3. **Architecture:** Analyze the structure of routes, controllers, services, and data access layers.

@@ -51,9 +51,10 @@ When making implementation decisions, adhere strictly to these rules:
   - Pass fetched data down to Client Components as props.
   - Use SWR or React Query for client-side mutations, revalidation, and caching.
 
-# Project Discovery
+# Project Discovery & Rules
 
 Before initiating any edits, you must understand the context of the codebase:
+0. **Project Rules:** Check for `.heidi/rules.md` or `.opencode/rules.md` and adhere strictly to any project-specific guidelines.
 1. **Dependencies:** Check `package.json` to identify the framework (Next.js, Vite), language (TypeScript, JavaScript), and installed packages.
 2. **Styling Config:** Check `tailwind.config.ts/js` and global stylesheets (e.g., `globals.css`) for design tokens, custom colors, and base styles.
 3. **Component Patterns:** Examine neighboring components to deduce the project's structural and naming conventions.

@@ -24,6 +24,7 @@ Options:
   --config-global       Update global opencode.json with agent definitions
   --config-project      Update project opencode.json with agent definitions
   --default AGENT       Set default_agent in opencode.json (requires --config-global or --config-project)
+  --init-rules          Create template .heidi/rules.md in current directory
   --repair              Run all install paths + config + doctor
 
 If no flag is given, --global is assumed.
@@ -60,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --diff) MODE="diff"; shift ;;
     --config-global) DO_CONFIG_GLOBAL=true; shift ;;
     --config-project) DO_CONFIG_PROJECT=true; shift ;;
+    --init-rules) MODE="init-rules"; shift ;;
     --repair) MODE="repair"; shift ;;
     --default)
       DO_DEFAULT=true
@@ -454,6 +456,43 @@ diff_mode() {
   fi
 }
 
+# ============================================================
+# INIT RULES MODE
+# ============================================================
+init_rules_mode() {
+  echo "=== Initializing .heidi/rules.md ==="
+  local target_dir="$(pwd)/.heidi"
+  local target_file="$target_dir/rules.md"
+  local template_file="$SCRIPT_DIR/opencode-agent-pack/templates/rules.md"
+
+  mkdir -p "$target_dir"
+
+  if [ -f "$target_file" ]; then
+    echo "Warning: $target_file already exists. Backup created."
+    cp "$target_file" "$target_file.bak.$(date +%Y%m%d-%H%M%S)"
+  fi
+
+  if [ -f "$template_file" ]; then
+    cp "$template_file" "$target_file"
+    echo "Created $target_file from template."
+  else
+    cat <<'EOF' > "$target_file"
+# Repository Rules & Memory
+
+This file contains repository-specific guidelines, architecture principles, and learned preferences for Heidi AI agents working on this project.
+
+## Code & Architecture Guidelines
+- **Framework & Language**: Specify primary stack conventions.
+- **Styling**: Utility classes vs custom CSS tokens.
+- **Testing**: Preferred test framework and commands (`npm test`, `pytest`, `cargo test`).
+
+## Persistent Learnings
+- *Add key project decisions or user preferences here so Heidi remembers them across sessions.*
+EOF
+    echo "Created default $target_file."
+  fi
+}
+
 # Handle non-install modes first
 case "${MODE:-global}" in
   check)
@@ -470,6 +509,10 @@ case "${MODE:-global}" in
     ;;
   diff)
     diff_mode
+    exit 0
+    ;;
+  init-rules)
+    init_rules_mode
     exit 0
     ;;
 esac

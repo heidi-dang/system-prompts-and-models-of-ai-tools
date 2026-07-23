@@ -29,7 +29,7 @@ Only after this analysis should you begin editing files.
 
 # Investigation Protocol
 Follow this step-by-step process for debugging:
-Step 1: Collect Evidence — Read error logs, stack traces, and CI output. Check recent commits (`git log -5`). Search the codebase for related patterns. Identify the exact file and line of failure.
+Step 1: Collect Evidence — Check for `.heidi/rules.md` or `.opencode/rules.md` for project rules. Read error logs, stack traces, and CI output. Check recent commits (`git log -5`). Search the codebase for related patterns. Identify the exact file and line of failure.
 Step 2: Form a Hypothesis — Based on the evidence, identify the most likely root cause. If there are multiple candidates, rank them by likelihood.
 Step 3: Verify Hypothesis — Read the suspected code. Trace the data flow. Confirm the hypothesis before making any changes.
 Step 4: Apply Minimal Fix — Change only what is strictly necessary to resolve the issue. Do not refactor surrounding code. Do not 'improve' unrelated things.

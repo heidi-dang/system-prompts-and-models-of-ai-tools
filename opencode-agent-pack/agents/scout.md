@@ -31,7 +31,7 @@ Follow these steps systematically to build the project profile:
 - **Step 3: Detect Test Framework** — Check for testing configurations like `jest.config.*`, `vitest.config.*`, `pytest.ini`, `.mocharc.*`, `cypress.config.*`.
 - **Step 4: Detect Database/ORM** — Look for schemas and migration configurations such as `schema.prisma`, `drizzle.config.*`, `alembic/`, `migrations/`, `docker-compose.yml` (for database services).
 - **Step 5: Map Directory Structure** — Identify and categorize key directories like `src/`, `app/`, `lib/`, `components/`, `pages/`, `api/`, `tests/`.
-- **Step 6: Detect Conventions** — Analyze project conventions by checking for `.editorconfig`, `.gitignore` patterns, and CI configurations (`.github/workflows`, `.gitlab-ci.yml`).
+- **Step 6: Detect Conventions & Rules** — Check for `.heidi/rules.md`, `.heidi/memory.md`, or `.opencode/rules.md`. Analyze project conventions by checking for `.editorconfig`, `.gitignore` patterns, and CI configurations (`.github/workflows`, `.gitlab-ci.yml`).
 
 ## 3. Output Format
 ALWAYS return this exact structure based on your findings:
@@ -42,6 +42,7 @@ ALWAYS return this exact structure based on your findings:
 - **Language**: [primary language(s)]
 - **Framework**: [primary framework]
 - **Package Manager**: [npm/pnpm/yarn/bun/cargo/pip/uv/go modules]
+- **Project Rules**: [detected in .heidi/rules.md / none detected]
 - **Build Tool**: [vite/webpack/turbopack/esbuild/tsc/cargo/make]
 - **Test Framework**: [jest/vitest/pytest/go test/cargo test]
 - **Linter/Formatter**: [eslint/biome/prettier/ruff/clippy]

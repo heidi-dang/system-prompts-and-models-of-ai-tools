@@ -17,24 +17,61 @@ backend
 debugger
 auditor
 planner
+scout
 ```
 
 ## Agents
 
 | Agent | Mode | Purpose |
 |---|---|---|
-| **heidi** | all | Orchestrator — routes work to specialists, handles general tasks |
-| **frontend** | all | React, TypeScript, Tailwind, Next/Vite UI, UX, a11y |
-| **backend** | all | APIs, databases, Prisma, auth, server logic, migrations |
-| **debugger** | all | Bugs, CI failures, regressions, root-cause analysis |
-| **auditor** | all | Read-only code review, architecture, security analysis |
-| **planner** | all | Feature specs, architecture plans, task breakdown |
+| **heidi** | all | Orchestrator — routes work to specialists, handles general tasks, manages error recovery |
+| **frontend** | all | React, TypeScript, Tailwind, Next/Vite UI, UX, a11y, with decision frameworks |
+| **backend** | all | APIs, databases, Prisma, auth, server logic, migrations, security protocols |
+| **debugger** | all | Bugs, CI failures, regressions, root-cause analysis, with retry limits |
+| **auditor** | all | Read-only code review, architecture, security analysis, with severity templates |
+| **planner** | all | Feature specs, architecture plans, task breakdown, with gated approval |
+| **scout** | all | Project reconnaissance, stack detection, directory mapping (read-only) |
+
+## Architecture
+
+```
+User Request
+    │
+    ▼
+  heidi (orchestrator)
+    │
+    ├── Simple task? → heidi handles it directly
+    │
+    ├── Unfamiliar project? → @scout → project profile
+    │
+    ├── UI work? → @frontend
+    │
+    ├── API/DB work? → @backend
+    │
+    ├── Bug/failure? → @debugger
+    │
+    ├── Code review? → @auditor
+    │
+    └── Large feature? → @planner → then specialists
+```
+
+## Agent Design Principles
+
+Every agent in this pack follows these design principles:
+
+1. **Reasoning Protocol** — Think before acting. Every agent assesses the task before executing.
+2. **Anti-Patterns** — Explicit "DO NOT" lists prevent common failure modes.
+3. **Retry Limits** — Hard cap of 3 attempts on any single issue, then escalate to user.
+4. **Structured Output** — Consistent response formats (What I Did / Files Changed / Verification / Status).
+5. **Project Discovery** — Detect the project stack from config files. Never assume React/TypeScript/Tailwind.
+6. **Self-Compliance** — The orchestrator self-audits after each action.
 
 ## Usage
 
 Use **heidi** as your default orchestrator. Use individual agents directly when you want a specialist:
 
 - `@heidi` — general tasks, routing to specialists
+- `@scout` — project reconnaissance (run this first on new projects)
 - `@frontend` — UI work
 - `@backend` — API/database work
 - `@debugger` — CI/bug/root-cause work
@@ -100,6 +137,16 @@ Run all install paths, JSON config, and diagnostics:
 ./agent.sh --default heidi --config-global
 ```
 
+### Preview changes
+
+```bash
+# See what would be installed without doing it
+./agent.sh --dry-run
+
+# See diff between installed and source agents
+./agent.sh --diff
+```
+
 ### Diagnostics
 
 ```bash
@@ -128,19 +175,25 @@ If the custom agents do not appear in the OpenCode web UI after installation:
    ```
    This shows the opencode binary path, version, all agent directories, and whether `opencode agent list` finds the custom agents.
 
-3. **Run full repair:**
+3. **Compare source vs installed:**
+   ```bash
+   ./agent.sh --diff
+   ```
+   This shows exactly what's different between your source agents and installed agents.
+
+4. **Run full repair:**
    ```bash
    ./agent.sh --repair
    ```
    This installs to all paths, writes JSON config, and runs diagnostics.
 
-4. **Understand the discovery chain:**
+5. **Understand the discovery chain:**
    - `Build` and `Plan` are built-in agents — they always appear.
    - Custom agents should appear after OpenCode reloads its agent registry.
    - If agent files exist but `opencode agent list` does **not** show them → run `./agent.sh --repair`.
    - If `opencode agent list` shows them but the web UI does **not** → the current web session is stale or running from a different server/user/project. Start a new OpenCode session from the same project folder.
 
-5. **Project install note:** `--project` and `--config-project` install relative to the current directory where `agent.sh` is run. Make sure to run it from the same project folder you open in OpenCode.
+6. **Project install note:** `--project` and `--config-project` install relative to the current directory where `agent.sh` is run. Make sure to run it from the same project folder you open in OpenCode.
 
 ## What is not affected
 

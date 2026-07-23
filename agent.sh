@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_SRC="$SCRIPT_DIR/opencode-agent-pack/agents"
-AGENT_NAMES=(heidi frontend backend debugger auditor planner)
+AGENT_NAMES=(heidi frontend backend debugger auditor planner scout)
 
 usage() {
   cat <<EOF
@@ -19,6 +19,8 @@ Options:
                         Combine with --global, --project, or --both
   --check               Print diagnostic information without installing
   --doctor              Print runtime discovery diagnostics
+  --dry-run             Show what would be installed without doing it
+  --diff                Show diff between installed and source agents
   --config-global       Update global opencode.json with agent definitions
   --config-project      Update project opencode.json with agent definitions
   --default AGENT       Set default_agent in opencode.json (requires --config-global or --config-project)
@@ -54,6 +56,8 @@ while [[ $# -gt 0 ]]; do
     --legacy) DO_LEGACY=true; shift ;;
     --check) MODE="check"; shift ;;
     --doctor) MODE="doctor"; shift ;;
+    --dry-run) MODE="dry-run"; shift ;;
+    --diff) MODE="diff"; shift ;;
     --config-global) DO_CONFIG_GLOBAL=true; shift ;;
     --config-project) DO_CONFIG_PROJECT=true; shift ;;
     --repair) MODE="repair"; shift ;;
@@ -302,6 +306,28 @@ agent_configs = {
         "temperature": 0.1,
         "prompt": "{file:%s/planner.md}" % prompt_prefix,
         "permission": {"edit": "deny", "bash": "deny"}
+    },
+    "scout": {
+        "description": "Project reconnaissance and stack detection specialist",
+        "mode": "all",
+        "temperature": 0.1,
+        "prompt": "{file:%s/scout.md}" % prompt_prefix,
+        "permission": {
+            "edit": "deny",
+            "bash": {
+                "*": "ask",
+                "cat*": "allow",
+                "ls*": "allow",
+                "find*": "allow",
+                "grep*": "allow",
+                "head*": "allow",
+                "tail*": "allow",
+                "wc*": "allow",
+                "file*": "allow",
+                "pwd": "allow",
+                "tree*": "allow"
+            }
+        }
     }
 }
 
@@ -352,6 +378,82 @@ write_json_config() {
 # MAIN LOGIC
 # ============================================================
 
+# ============================================================
+# DRY-RUN MODE
+# ============================================================
+dry_run_mode() {
+  echo "=== Dry Run: What Would Be Installed ==="
+  echo ""
+  echo "Source agents:"
+  for agent in "${AGENT_NAMES[@]}"; do
+    src="$AGENT_SRC/$agent.md"
+    if [ -f "$src" ]; then
+      echo "  $agent.md ($(wc -c < "$src" | tr -d ' ') bytes)"
+    else
+      echo "  $agent.md (NOT FOUND — would be skipped)"
+    fi
+  done
+  echo ""
+  echo "Would install to:"
+  echo "  Global: $OFFICIAL_GLOBAL"
+  echo "  Project: $OFFICIAL_PROJECT"
+  if [ "$DO_LEGACY" = true ]; then
+    echo "  Legacy global: $LEGACY_GLOBAL"
+    echo "  Legacy project: $LEGACY_PROJECT"
+  fi
+  echo ""
+  echo "Existing files that would be backed up:"
+  local found=false
+  for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+    for agent in "${AGENT_NAMES[@]}"; do
+      dst="$target_dir/$agent.md"
+      if [ -f "$dst" ]; then
+        echo "  $dst"
+        found=true
+      fi
+    done
+  done
+  if [ "$found" = false ]; then
+    echo "  (none)"
+  fi
+  echo ""
+  echo "No changes were made. Run without --dry-run to install."
+}
+
+# ============================================================
+# DIFF MODE
+# ============================================================
+diff_mode() {
+  echo "=== Diff: Source vs Installed ==="
+  local any_diff=false
+  for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+    if [ ! -d "$target_dir" ]; then
+      continue
+    fi
+    for agent in "${AGENT_NAMES[@]}"; do
+      src="$AGENT_SRC/$agent.md"
+      dst="$target_dir/$agent.md"
+      if [ ! -f "$src" ]; then
+        continue
+      fi
+      if [ ! -f "$dst" ]; then
+        echo "--- $agent.md: NOT INSTALLED at $target_dir"
+        any_diff=true
+        continue
+      fi
+      if ! diff -q "$src" "$dst" > /dev/null 2>&1; then
+        echo ""
+        echo "=== $agent.md ($target_dir) ==="
+        diff -u "$dst" "$src" || true
+        any_diff=true
+      fi
+    done
+  done
+  if [ "$any_diff" = false ]; then
+    echo "All installed agents match source. No differences found."
+  fi
+}
+
 # Handle non-install modes first
 case "${MODE:-global}" in
   check)
@@ -360,6 +462,14 @@ case "${MODE:-global}" in
     ;;
   doctor)
     doctor_mode
+    exit 0
+    ;;
+  dry-run)
+    dry_run_mode
+    exit 0
+    ;;
+  diff)
+    diff_mode
     exit 0
     ;;
 esac

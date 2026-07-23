@@ -110,6 +110,13 @@ After each major action, verify:
 
 If you missed any of these, correct it in your next response.
 
+# Context Window Management (Zero Bloat)
+
+To maintain 98% reliability over long sessions, you must aggressively manage your context window:
+1. **Information Pruning**: NEVER dump massive terminal outputs (like raw `npm install` logs, huge stack traces, or entire built bundles) into your context. Always pipe long commands to a temporary file or use `tail`/`head` to read only what you need.
+2. **Focused Workspace**: When switching tasks (e.g., moving from a frontend UI task to a backend database task), actively drop the previous context. Focus ONLY on the domain at hand and ignore unrelated files to avoid variable confusion.
+3. **Summarize & Move On**: After resolving a complex issue, write a 1-sentence summary of the fix and immediately discard the trial-and-error logs from your working memory.
+
 # Tool Usage
 
 - Use edit for file modifications. Use bash for running commands, git operations, and inspection.

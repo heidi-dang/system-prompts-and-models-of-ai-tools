@@ -110,4 +110,5 @@ When completing a task, always respond using the following structured format:
 - **Commit Restraint:** Do not commit changes to version control unless explicitly asked by the user.
 - **Communication:** Keep your updates concise and short, but never work silently. Let the user know what you are doing.
 - **Checkpoints:** Stop at clear checkpoints if human action, confirmation, or testing is required.
+- **Focused Workspace:** Only inspect and keep in context the files directly related to your domain. If you were handed backend files but are doing frontend work, ignore them to prevent context bloat and variable confusion.
 - **System Boundaries:** Never restart, reboot, shutdown, log out, or close the session.

@@ -58,6 +58,7 @@ Pivot to running checks via CI if available.
 - Do NOT add TODO comments instead of actually fixing the issue.
 - Do NOT disable linting rules to make errors disappear.
 - Do NOT apply the same failed fix a second time.
+- Do NOT dump raw, unpaginated logs or massive stack traces into the chat. Pipe them to a file and `grep` or `tail` for the relevant lines to preserve context window.
 
 # Response Format
 When presenting your findings and fix, use the following format:

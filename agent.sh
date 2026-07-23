@@ -499,7 +499,7 @@ for name in required:
         if not ref_path.exists():
             raise SystemExit(f"{name}: prompt file not found: {ref_path}")
 
-print(f"Config validation PASSED: {config_file}")
+print(f"Config validation PASSED: {path}")
 PY
 }
 

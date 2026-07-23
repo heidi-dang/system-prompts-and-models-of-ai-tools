@@ -3,8 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_SRC="$SCRIPT_DIR/opencode-agent-pack/agents"
-PROMPT_SRC="$SCRIPT_DIR/opencode-agent-pack/prompts"
-TEMPLATES_DIR="$SCRIPT_DIR/opencode-agent-pack/templates"
 VERSION_FILE="$SCRIPT_DIR/opencode-agent-pack/VERSION"
 PACK_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo 'unknown')"
 
@@ -59,7 +57,6 @@ CONFIG_DIR="${OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}"
 
 # --- Flags ---
 MODE="global"
-DO_LEGACY=false
 DO_CONFIG_GLOBAL=false
 DO_CONFIG_PROJECT=false
 DO_DEFAULT=false
@@ -247,7 +244,7 @@ doctor_mode() {
   echo "--- File checks ---"
   for d in "$CONFIG_DIR/agents" "$(pwd)/.opencode/agents"; do
     if [ -d "$d" ]; then
-      echo "  $d: EXISTS ($(ls "$d"/*.md 2>/dev/null | wc -l) .md files)"
+      echo "  $d: EXISTS ($(find "$d" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l) .md files)"
     else
       echo "  $d: NOT FOUND"
     fi
@@ -450,7 +447,8 @@ write_json_config() {
   rm -f "$tmp_config"
 
   if [ -f "$config_file" ]; then
-    local backup="$config_file.bak.$(date +%Y%m%d-%H%M%S)"
+    local backup
+    backup="$config_file.bak.$(date +%Y%m%d-%H%M%S)"
     cp "$config_file" "$backup"
     echo "Backed up existing $config_file -> $backup"
   fi
@@ -473,6 +471,8 @@ import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
+config_dir = path.parent
+
 with path.open(encoding="utf-8") as handle:
     config = json.load(handle)
 
@@ -488,15 +488,15 @@ missing = sorted(required.difference(agents))
 if missing:
     raise SystemExit(f"missing agents: {', '.join(missing)}")
 
-# Verify prompt paths exist
+# Verify prompt paths exist (resolve relative to config file directory)
 for name in required:
     prompt = agents[name].get("prompt", "")
     if not prompt:
         raise SystemExit(f"{name}: missing prompt")
-    # Check {file:...} references
     if prompt.startswith("{file:"):
-        ref_path = prompt[len("{file:"):-1]
-        if not Path(ref_path).exists():
+        ref = prompt[len("{file:"):-1]
+        ref_path = config_dir / ref
+        if not ref_path.exists():
             raise SystemExit(f"{name}: prompt file not found: {ref_path}")
 
 print(f"Config validation PASSED: {config_file}")
@@ -538,15 +538,18 @@ uninstall_from() {
   if [ -n "$config_file" ] && [ -f "$config_file" ]; then
     python3 - "$config_file" <<'PY' || true
 import json
-config = json.loads(open(import_kwargs['file']).read())
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    config = json.load(f)
 heidi_agents = {"heidi","frontend","backend","debugger","auditor","planner","scout"}
 if "agent" in config:
     for name in heidi_agents:
         config["agent"].pop(name, None)
-with open(import_kwargs['file'], 'w') as f:
+with open(path, 'w') as f:
     json.dump(config, f, indent=2)
     f.write("\n")
-print(f"Removed Heidi entries from {import_kwargs['file']}")
+print(f"Removed Heidi entries from {path}")
 PY
   fi
   rmdir "$target" 2>/dev/null || true
@@ -569,7 +572,7 @@ rollback_from() {
     if [ -f "$file" ]; then
       # Find newest backup
       local backup
-      backup=$(ls -t "$file.bak."* 2>/dev/null | head -1 || true)
+      backup="$(find "$(dirname "$file")" -maxdepth 1 -name "$(basename "$file").bak.*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
       if [ -n "$backup" ] && [ -f "$backup" ]; then
         cp "$backup" "$file"
         echo "Restored: $file <- $backup"
@@ -580,7 +583,7 @@ rollback_from() {
   # Rollback JSON config if backup exists
   if [ -n "$config_file" ] && [ -f "$config_file" ]; then
     local cfg_backup
-    cfg_backup=$(ls -t "$config_file.bak."* 2>/dev/null | head -1 || true)
+    cfg_backup="$(find "$(dirname "$config_file")" -maxdepth 1 -name "$(basename "$config_file").bak.*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
     if [ -n "$cfg_backup" ] && [ -f "$cfg_backup" ]; then
       cp "$cfg_backup" "$config_file"
       echo "Restored: $config_file <- $cfg_backup"
@@ -596,10 +599,9 @@ rollback_from() {
 # INIT RULES
 # ============================================================
 init_rules_mode() {
-  local target_dir="$(pwd)/.heidi"
+  local target_dir
+  target_dir="$(pwd)/.heidi"
   mkdir -p "$target_dir"
-  local timestamp
-  timestamp="$(date +%Y-%m-%dT%H:%M:%S%z)"
 
   # rules.md (stack-neutral template)
   local rules_file="$target_dir/rules.md"

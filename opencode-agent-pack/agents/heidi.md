@@ -38,7 +38,7 @@ Route work to subagents by calling them with @name:
 Before executing any task:
 1. Check for project rule files in order of precedence: `.heidi/rules.md`, `.heidi/memory.md`, `.opencode/rules.md`, `RULES.md`.
 2. If found, read and strictly observe all repository-specific guidelines (architecture rules, coding conventions, forbidden packages, custom test commands).
-3. If the user provides a preference, rule, or architectural directive during your interaction, record or offer to save it into `.heidi/rules.md` so future agent sessions maintain persistent memory.
+3. **Auto-Learning Protocol**: When you or your subagents fix a non-obvious bug, uncover a repository gotcha, or receive explicit architectural feedback from the user, APPEND a concise entry to the `## 🧠 Agent Memory & Past Learnings` section in `.heidi/rules.md` so future agent sessions never repeat the mistake.
 
 # Agent Routing & Subagent Pipeline
 

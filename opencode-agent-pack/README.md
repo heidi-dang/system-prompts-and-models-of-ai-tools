@@ -1,224 +1,239 @@
-# Heidi OpenCode Agent Pack
+# Heidi OpenCode Agent Pack v1.2.0
 
-A set of custom agents for OpenCode that provide specialized development assistance. These agents install alongside the official OpenCode build and plan agents without replacing them.
-
-All custom agents use `mode: all` so they appear in the OpenCode agent selector alongside the official Build and Plan agents.
-
-## Expected OpenCode UI
-
-After installation, the OpenCode agent selector shows:
-
-```
-Build
-Plan
-heidi
-frontend
-backend
-debugger
-auditor
-planner
-scout
-```
-
-## Agents
-
-| Agent | Mode | Purpose |
-|---|---|---|
-| **heidi** | all | Orchestrator — routes work to specialists, handles general tasks, manages error recovery |
-| **frontend** | all | React, TypeScript, Tailwind, Next/Vite UI, UX, a11y, with decision frameworks |
-| **backend** | all | APIs, databases, Prisma, auth, server logic, migrations, security protocols |
-| **debugger** | all | Bugs, CI failures, regressions, root-cause analysis, with retry limits |
-| **auditor** | all | Read-only code review, architecture, security analysis, with severity templates |
-| **planner** | all | Feature specs, architecture plans, task breakdown, with gated approval |
-| **scout** | all | Project reconnaissance, stack detection, directory mapping (read-only) |
+A production-grade set of seven custom agents for [OpenCode](https://opencode.ai) that install alongside the built-in `Build` and `Plan` agents.
 
 ## Architecture
 
-```
-User Request
-    │
-    ▼
-  heidi (orchestrator)
-    │
-    ├── Simple task? → heidi handles it directly
-    │
-    ├── Unfamiliar project? → @scout → project profile
-    │
-    ├── UI work? → @frontend
-    │
-    ├── API/DB work? → @backend
-    │
-    ├── Bug/failure? → @debugger
-    │
-    ├── Code review? → @auditor
-    │
-    └── Large feature? → @planner → then specialists
-```
+| Agent    | Mode       | Permission    | Purpose |
+| -------- | ---------- | ------------- | ------- |
+| **heidi** | `primary`  | Edit+Bash+Task | Orchestrator with task allowlist |
+| **scout** | `subagent` | Read-only      | Project reconnaissance |
+| **planner** | `subagent` | Read-only    | Feature planning and specs |
+| **auditor** | `subagent` | Read-only    | Code review and analysis |
+| **frontend** | `subagent` | Edit+Bash    | UI/React/Tailwind work |
+| **backend** | `subagent` | Edit+Bash    | API/database/server work |
+| **debugger** | `subagent` | Edit+Bash    | Bug fixing and root cause |
 
-## Agent Design Principles
+- **Heidi** uses `mode: primary` with an explicit task allowlist allowing only the six specialists.
+- **Specialists** use `mode: subagent` and deny task delegation.
+- **Read-only agents** (scout, planner, auditor) deny edit, bash, and task with no broad command prefixes.
+- **All agents** deny restart/reboot/shutdown/logout.
 
-Every agent in this pack follows these design principles:
-
-1. **Reasoning Protocol** — Think before acting. Every agent assesses the task before executing.
-2. **Anti-Patterns** — Explicit "DO NOT" lists prevent common failure modes.
-3. **Retry Limits** — Hard cap of 3 attempts on any single issue, then escalate to user.
-4. **Structured Output** — Consistent response formats (What I Did / Files Changed / Verification / Status).
-5. **Project Discovery** — Detect the project stack from config files. Never assume React/TypeScript/Tailwind.
-6. **Self-Compliance** — The orchestrator self-audits after each action.
-7. **Project Rules & Memory** — All agents inspect `.heidi/rules.md` for repository constraints and auto-record learnings.
-
-## Project Rules & Persistent Memory System (`.heidi/rules.md`)
-
-This agent pack features a living memory system for your repository:
-
-* **Command Registry**: Defines exact `Typecheck`, `Lint`, `Test`, and `Build` commands so agents never guess scripts.
-* **Architecture Constraints**: Records framework, styling, state management, and DB/ORM rules.
-* **Gotchas & Anti-Patterns**: Documents repository-specific forbidden patterns.
-* **🧠 Auto-Learning Memory Protocol**: When `@heidi` or specialists fix a non-obvious bug, uncover a build/test gotcha, or receive user preferences, they automatically append a persistent rule to `## 🧠 Agent Memory & Past Learnings` in `.heidi/rules.md`.
-
-### Initialize Project Rules
-
-To generate a pre-populated `.heidi/rules.md` template in your workspace:
+## Quick Start
 
 ```bash
-./agent.sh --init-rules
-```
-
-If `.heidi/rules.md` does not exist when `@scout` inspects a project, `@scout` will automatically draft a pre-populated template in its output report.
-
-## Usage
-
-Use **heidi** as your default orchestrator. Use individual agents directly when you want a specialist:
-
-- `@heidi` — general tasks, routing to specialists
-- `@scout` — project reconnaissance (run this first on new projects)
-- `@frontend` — UI work
-- `@backend` — API/database work
-- `@debugger` — CI/bug/root-cause work
-- `@auditor` — read-only review
-- `@planner` — large feature breakdown
-
-## Installation
-
-### Global install (default)
-
-Installs into `~/.config/opencode/agents/` (or `$OPENCODE_CONFIG_DIR/agents`).
-
-```bash
-./agent.sh
-```
-
-### Per-project install
-
-Installs into `.opencode/agents/` in the current directory.
-
-```bash
-./agent.sh --project
-```
-
-### Both
-
-```bash
-./agent.sh --both
-```
-
-### Legacy paths
-
-Some OpenCode versions use `agent/` (singular). Install to both official and legacy paths:
-
-```bash
-./agent.sh --both --legacy
-```
-
-### JSON config fallback
-
-If agent markdown files alone are not enough, register agents in the OpenCode JSON config:
-
-```bash
-# Project-level
-./agent.sh --config-project
-
-# Global-level
-./agent.sh --config-global
-```
-
-### Max compatibility (repair)
-
-Run all install paths, JSON config, and diagnostics:
-
-```bash
+git clone https://github.com/heidi-dang/system-prompts-and-models-of-ai-tools.git
+cd system-prompts-and-models-of-ai-tools
 ./agent.sh --repair
 ```
 
-### Set default agent
+## Global Installation
 
 ```bash
-./agent.sh --default heidi --config-project
-./agent.sh --default heidi --config-global
+./agent.sh                      # global (default, ~/.config/opencode/agents/)
+./agent.sh --global             # explicit global
+./agent.sh --config-global      # global markdown + opencode.json config
 ```
 
-### Preview changes
+## Project Installation
 
 ```bash
-# See what would be installed without doing it
-./agent.sh --dry-run
-
-# See diff between installed and source agents
-./agent.sh --diff
+./agent.sh --project            # per-project (.opencode/agents/)
+./agent.sh --config-project     # project markdown + opencode.json config
+./agent.sh --both               # both global and project
 ```
 
-### Diagnostics
+## JSON Configuration Generation
+
+The installer writes to the `agent` key (singular) in `opencode.json`, never the deprecated `agents` key.
 
 ```bash
-./agent.sh --check
-./agent.sh --doctor
+./agent.sh --config-global      # updates ~/.config/opencode/opencode.json
+./agent.sh --config-project     # updates ./opencode.json
+./agent.sh --default heidi --config-global   # set default agent
 ```
 
-### Override config directory
+Configuration generation:
+- Uses `$schema: "https://opencode.ai/config.json"`
+- Preserves unrelated keys and user-defined agents
+- Writes atomically via temp file + `mv`
+- Validates generated config before completion
+- Skips backup when content would be identical
+
+## Rules, Commands, and Memory
 
 ```bash
-OPENCODE_CONFIG_DIR=/custom/path ./agent.sh --global
+./agent.sh --init-rules          # create .heidi/ with rules.md, commands.md, memory.jsonl
+./agent.sh --init-rules --force  # reinitialize with backup
 ```
 
-## Troubleshooting
+- **rules.md** — Stack-neutral repository policies (fill in detected tech)
+- **commands.md** — Verified commands with evidence sources
+- **memory.jsonl** — Structured durable learning records
 
-If the custom agents do not appear in the OpenCode web UI after installation:
+Agents use a memory-candidate protocol: specialists propose learnings, Heidi verifies and writes only high-confidence durable entries.
 
-1. **Check if files are installed:**
-   ```bash
-   ./agent.sh --check
-   ```
+### Memory Utility
 
-2. **Run runtime diagnostics:**
-   ```bash
-   ./agent.sh --doctor
-   ```
-   This shows the opencode binary path, version, all agent directories, and whether `opencode agent list` finds the custom agents.
+```bash
+python3 opencode-agent-pack/scripts/memory.py validate .heidi/memory.jsonl
+python3 opencode-agent-pack/scripts/memory.py add \
+  --file .heidi/memory.jsonl \
+  --category bug_gotcha \
+  --summary "Example" \
+  --evidence "path/file:42" \
+  --confidence high
+python3 opencode-agent-pack/scripts/memory.py list --file .heidi/memory.jsonl
+```
 
-3. **Compare source vs installed:**
-   ```bash
-   ./agent.sh --diff
-   ```
-   This shows exactly what's different between your source agents and installed agents.
+## Diagnostics
 
-4. **Run full repair:**
-   ```bash
-   ./agent.sh --repair
-   ```
-   This installs to all paths, writes JSON config, and runs diagnostics.
+```bash
+./agent.sh --check          # file-level inspection
+./agent.sh --doctor         # runtime discovery diagnostics
+./agent.sh --diff           # diff source vs installed
+./agent.sh --dry-run        # preview without modifying
+```
 
-5. **Understand the discovery chain:**
-   - `Build` and `Plan` are built-in agents — they always appear.
-   - Custom agents should appear after OpenCode reloads its agent registry.
-   - If agent files exist but `opencode agent list` does **not** show them → run `./agent.sh --repair`.
-   - If `opencode agent list` shows them but the web UI does **not** → the current web session is stale or running from a different server/user/project. Start a new OpenCode session from the same project folder.
+## Lifecycle
 
-6. **Project install note:** `--project` and `--config-project` install relative to the current directory where `agent.sh` is run. Make sure to run it from the same project folder you open in OpenCode.
+```bash
+./agent.sh --uninstall       # remove managed agents and config entries
+./agent.sh --rollback        # restore newest backup set
+./agent.sh --version         # show pack version
+```
 
-## What is not affected
+## Task Identifiers
 
-Official OpenCode `build` and `plan` agents are untouched. This pack only adds new agents.
+When using the `task` tool in prompts, pass exact agent identifiers without `@`:
+- Correct: `scout`, `frontend`, `backend`, `debugger`, `auditor`, `planner`
+- Incorrect: `@scout`, `@frontend`
+
+The `@` prefix is for manual user invocation only.
 
 ## Idempotent
 
-Running the installer multiple times is safe. Existing agent files are backed up with a `.bak.TIMESTAMP` suffix before overwriting.
+Running the installer multiple times is safe. Unchanged files are skipped via `cmp -s`. Backups are created only when content changes.
+
+## Troubleshooting
+
+If agents do not appear in the OpenCode web UI:
+
+1. `./agent.sh --check` — verify files are installed
+2. `./agent.sh --doctor` — check `opencode agent list` discovery
+3. `./agent.sh --repair` — full install + config + diagnostics
+4. Start a new OpenCode session from the project folder
+
+## Testing
+
+```bash
+python3 tests/validate_agents.py          # agent definitions
+python3 -m unittest tests.test_memory -v  # memory utility
+bash tests/test_installer.sh              # installer suite
+```
+
+## Legendary Heidi Runtime (v1.4.0)
+
+Legendary Heidi preserves OpenCode's native model-specific intelligence and adds
+a modular orchestration layer on top. See `docs/legendary-heidi/` for full documentation.
+
+### Key Capabilities
+- **Native Intelligence Bridge**: Composes with provider-specific prompts instead of replacing them
+- **Automatic Runtime Lifecycle**: Context retrieval, strategy selection, task ledger, runtime events
+- **Fast Path**: Low-overhead execution for simple tasks (typo fixes, config changes)
+- **Verified Memory**: Memory Candidates replace direct rules.md mutation
+- **Prompt Proposals**: Validated, evaluated, and approved prompt evolution
+- **Resilience**: Failure classifier, circuit breaker, bounded retries
+- **Build-vs-Heidi Benchmarks**: Deterministic grading with same-model comparisons
+- **Full Lifecycle**: Install, doctor, migrate, benchmark, uninstall, rollback
+
+### Token Governance
+
+Heidi includes enforceable per-task token consumption limits to prevent runaway token usage (e.g., the 27M token incident).
+
+#### How Token Accounting Works
+
+- **Uncached input tokens**: Tokens from the request that were not served from cache.
+- **Cached input tokens**: Tokens from the request that were served from cache (lower cost).
+- **Output tokens**: Tokens generated by the model in the response.
+- **Reasoning tokens**: Tokens used for chain-of-thought reasoning (where supported).
+- **Cache-write tokens**: Tokens written to cache for future requests (full cost).
+
+#### Default Limits
+
+| Limit | Default | Description |
+|-------|---------|-------------|
+| `max_total_tokens` | 1,500,000 | Hard cap on total tokens per task |
+| `max_input_tokens_per_request` | 100,000 | Max input tokens per model call |
+| `max_output_tokens_per_request` | 8,000 | Max output tokens per model call |
+| `max_reasoning_tokens_per_request` | 12,000 | Max reasoning tokens per model call |
+| `max_model_calls` | 40 | Max model calls per task |
+| `max_subagent_calls` | 8 | Max subagent calls per task |
+| `max_calls_per_agent` | 3 | Max calls per individual agent |
+| `max_parallel_agents` | 2 | Max concurrent agents |
+| `max_audit_cycles` | 1 | Max automatic audit cycles |
+| `max_equivalent_retries` | 2 | Max retries for same fingerprint |
+| `warning_percent` | 70% | Warning threshold for optional delegation |
+| `hard_stop_percent` | 100% | Hard stop at budget limit |
+| `delegation_context_limit` | 1,500 | Target tokens for delegation handoff |
+| `delegation_context_max` | 4,000 | Strict max tokens for delegation handoff |
+
+#### Warning and Hard-Stop Behavior
+
+- **Warning (70%)**: Optional delegation is disabled. Heidi continues with direct execution only.
+- **Hard stop (100%)**: No additional model calls are made. Current work is preserved and a partial-completion report is produced.
+
+#### Configuration Example
+
+```json
+{
+  "consumption": {
+    "max_total_tokens": 1500000,
+    "max_input_tokens_per_request": 100000,
+    "max_output_tokens_per_request": 8000,
+    "max_reasoning_tokens_per_request": 12000,
+    "max_model_calls": 40,
+    "max_subagent_calls": 8,
+    "max_calls_per_agent": 3,
+    "max_parallel_agents": 2,
+    "max_audit_cycles": 1,
+    "max_equivalent_retries": 2,
+    "warning_percent": 70,
+    "hard_stop_percent": 100,
+    "delegation_context_limit": 1500,
+    "delegation_context_max": 4000
+  }
+}
+```
+
+#### Inspecting Per-Task Usage
+
+```bash
+# Check budget status during a task
+python3 opencode-agent-pack/scripts/token_budget.py status --budget-file <path> --task-id <id>
+
+# Generate a usage report
+python3 opencode-agent-pack/scripts/token_budget.py report --budget-file <path> --task-id <id>
+```
+
+#### Overriding Limits
+
+Edit the `consumption` section in `opencode-agent-pack/runtime/runtime-policy.json` and reinstall the agent pack.
+
+#### Diagnosing Abnormal Consumption
+
+```bash
+# Run the runtime doctor
+./agent.sh --runtime-doctor
+
+# Check token governance controls
+python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt
+```
+
+#### Disabling Nonessential Orchestration
+
+Use the `fast_direct` strategy for simple tasks to skip Scout, Planner, and Auditor:
+
+```bash
+python3 opencode-agent-pack/scripts/strategy_selector.py select --task "fix typo" --context <context.json>
+```

@@ -1,0 +1,6 @@
+tests/__pycache__/
+.opencode/agents/*.bak.*
+__pycache__/
+*.pyc
+.heidi/
+.opencode/agents/

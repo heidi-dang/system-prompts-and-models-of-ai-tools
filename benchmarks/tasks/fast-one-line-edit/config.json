@@ -1,0 +1,22 @@
+{
+  "task_id": "fast-one-line-edit-001",
+  "task_name": "Fix Typo in README",
+  "task_category": "fast-one-line-edit",
+  "description": "Fix a single-character typo in README.md",
+  "request": "Fix the typo in README.md: 'recieve' should be 'receive'",
+  "expected": {
+    "files_changed": ["README.md"],
+    "max_files_changed": 1,
+    "tests_must_pass": [],
+    "completion_required": true
+  },
+  "forbidden": {
+    "files_untouched": ["src/", "tests/", "package.json"],
+    "no_new_files": true,
+    "no_config_changes": true
+  },
+  "timeout_seconds": 120,
+  "complexity": "small",
+  "risk": "low",
+  "fast_path_applicable": true
+}

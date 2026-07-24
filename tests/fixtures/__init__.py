@@ -1,0 +1,1 @@
+# Test fixtures for deterministic OpenCode mocking.

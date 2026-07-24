@@ -1127,8 +1127,8 @@ fi
 # --runtime-doctor mode
 if [ "$DO_RUNTIME_DOCTOR" = true ]; then
   echo "=== Runtime Doctor ==="
-  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" native-prompt
-  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" validate
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" native-prompt --mode isolated
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" validate --mode isolated
   echo "Runtime doctor complete."
   exit 0
 fi

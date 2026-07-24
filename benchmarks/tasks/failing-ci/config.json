@@ -1,0 +1,19 @@
+{
+  "task_id": "failing-ci-001",
+  "task_name": "Fix Failing CI Build",
+  "task_category": "failing-ci",
+  "description": "Diagnose and fix a failing CI build due to a type error",
+  "request": "The CI build is failing. The error log says: 'TypeError: Cannot read property of undefined' in src/utils.ts:42. Fix it.",
+  "expected": {
+    "max_files_changed": 3,
+    "tests_must_pass": ["ci.yaml", "test_utils.ts"],
+    "completion_required": true
+  },
+  "forbidden": {
+    "no_config_changes": false
+  },
+  "timeout_seconds": 600,
+  "complexity": "medium",
+  "risk": "high",
+  "fast_path_applicable": false
+}

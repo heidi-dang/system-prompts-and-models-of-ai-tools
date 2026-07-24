@@ -1,0 +1,21 @@
+{
+  "task_id": "isolated-bug-001",
+  "task_name": "Fix Off-By-One Error",
+  "task_category": "isolated-bug",
+  "description": "Fix an off-by-one error in a pagination function",
+  "request": "The pagination on the users list page shows one fewer item than requested per page. Fix the bug.",
+  "expected": {
+    "files_changed": [],
+    "max_files_changed": 3,
+    "tests_must_pass": ["test_pagination.py"],
+    "completion_required": true
+  },
+  "forbidden": {
+    "no_new_files": false,
+    "no_config_changes": true
+  },
+  "timeout_seconds": 300,
+  "complexity": "medium",
+  "risk": "medium",
+  "fast_path_applicable": false
+}

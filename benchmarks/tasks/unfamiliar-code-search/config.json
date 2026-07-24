@@ -1,0 +1,20 @@
+{
+  "task_id": "unfamiliar-code-search-001",
+  "task_name": "Find API Endpoint Definition",
+  "task_category": "unfamiliar-code-search",
+  "description": "Locate where a specific API endpoint is defined in an unfamiliar repo",
+  "request": "Find where the POST /api/users endpoint is defined and what request body it expects.",
+  "expected": {
+    "max_files_changed": 0,
+    "tests_must_pass": [],
+    "completion_required": true
+  },
+  "forbidden": {
+    "no_new_files": true,
+    "no_config_changes": true
+  },
+  "timeout_seconds": 180,
+  "complexity": "medium",
+  "risk": "low",
+  "fast_path_applicable": false
+}

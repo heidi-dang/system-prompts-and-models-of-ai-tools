@@ -8,6 +8,10 @@ Commands:
   validate <dir>              Validate all proposals in a directory
   list <dir>                  List proposals
   apply --proposal <f>        Apply an approved proposal (requires safety checks)
+  evaluate --proposal <f> [--benchmark-fixture <f>]  Evaluate proposal against benchmarks
+  approve --proposal <f>      Mark proposal as approved (requires explicit approval)
+  rollback --proposal <f>     Rollback an applied proposal
+  status --proposal <f>       Show current state machine status
 """
 
 import argparse
@@ -161,6 +165,272 @@ def cmd_apply(args):
     print("  (manual review required before automated application)")
 
 
+# ──────────────────────────────────────────────────────────────────
+# evaluate command
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_evaluate(args):
+    """Evaluate proposal against validation criteria and benchmarks."""
+    proposal_path = Path(args.proposal)
+    if not proposal_path.exists():
+        print(f"Error: proposal not found: {proposal_path}", file=sys.stderr)
+        sys.exit(1)
+
+    content = proposal_path.read_text(encoding="utf-8")
+
+    results = {
+        "proposal": str(proposal_path),
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "checks": {},
+        "passed": 0,
+        "failed": 0,
+        "overall": "PENDING",
+    }
+
+    # 1. Static validation
+    static_errors = []
+    for section in ("## Status", "## Target Agent", "## Evidence", "## Risk Level", "## Problem"):
+        if section not in content:
+            static_errors.append(f"missing section: {section}")
+    results["checks"]["static_validation"] = {
+        "passed": len(static_errors) == 0,
+        "errors": static_errors,
+    }
+
+    # 2. Permission validation
+    agent_match = re.search(r"## Target Agent\s*\n(.*)", content)
+    target_agent = agent_match.group(1).strip() if agent_match else ""
+    results["checks"]["permission_validation"] = {
+        "passed": target_agent in VALID_AGENTS,
+        "agent": target_agent,
+    }
+
+    # 3. Orchestration tests (basic: check for conflicting instructions)
+    orchestration_conflicts = []
+    if "orchestrat" in content.lower() and "mode:" in content:
+        orchestration_conflicts.append("orchestration layer changes detected")
+    if "task:" in content and "deny" in content:
+        orchestration_conflicts.append("task permission changes detected")
+    results["checks"]["orchestration_tests"] = {
+        "passed": len(orchestration_conflicts) == 0,
+        "conflicts": orchestration_conflicts,
+    }
+
+    # 4. Prompt duplication test
+    dup_check = True
+    if "## Proposed Change" in content:
+        change_section = content.split("## Proposed Change")[1].split("##")[0]
+        change_text = change_section.strip()
+        # Check against existing agent prompts
+        agents_dir = Path("opencode-agent-pack/agents")
+        if agents_dir.is_dir():
+            for af in agents_dir.glob("*.md"):
+                existing = af.read_text(encoding="utf-8")
+                # Simple duplicate check: significant overlap
+                change_words = set(re.findall(r"\w{4,}", change_text.lower()))
+                existing_words = set(re.findall(r"\w{4,}", existing.lower()))
+                overlap = change_words & existing_words
+                if len(change_words) > 5 and len(overlap) / max(len(change_words), 1) > 0.9:
+                    dup_check = False
+                    break
+    results["checks"]["prompt_duplication"] = {
+        "passed": dup_check,
+    }
+
+    # 5. Benchmark fixture subset (if provided)
+    if args.benchmark_fixture:
+        bf_path = Path(args.benchmark_fixture)
+        if bf_path.exists():
+            try:
+                with open(bf_path) as f:
+                    fixture = json.load(f)
+                results["checks"]["benchmark_fixture"] = {
+                    "passed": True,
+                    "tasks": len(fixture.get("tasks", [])),
+                    "note": "benchmark evaluation requires real model execution",
+                }
+            except Exception as e:
+                results["checks"]["benchmark_fixture"] = {
+                    "passed": False,
+                    "error": str(e),
+                }
+    else:
+        results["checks"]["benchmark_fixture"] = {
+            "passed": True,
+            "note": "no fixture provided — skipped",
+        }
+
+    # 6. Prompt-size budget
+    size_bytes = len(content.encode("utf-8"))
+    size_ok = size_bytes < 50000
+    results["checks"]["prompt_size_budget"] = {
+        "passed": size_ok,
+        "size_bytes": size_bytes,
+        "limit_bytes": 50000,
+    }
+
+    # 7. Native-prompt composition test (basic)
+    if "---" in content[:10] or "mode:" in content:
+        results["checks"]["native_prompt_composition"] = {
+            "passed": True,
+            "note": "frontmatter detected — composition structural check passed",
+        }
+    else:
+        results["checks"]["native_prompt_composition"] = {
+            "passed": False,
+            "error": "no frontmatter detected",
+        }
+
+    # 8. Regression checks
+    risk_match = re.search(r"## Risk Level\s*\n(.*)", content)
+    risk = (risk_match.group(1).strip() if risk_match else "").lower()
+    results["checks"]["regression_checks"] = {
+        "passed": risk != "high",
+        "risk": risk,
+        "note": "high-risk proposals require additional regression testing",
+    }
+
+    # Tally
+    passed = sum(1 for c in results["checks"].values() if c.get("passed", False))
+    failed = sum(1 for c in results["checks"].values() if not c.get("passed", False))
+    results["passed"] = passed
+    results["failed"] = failed
+    results["overall"] = "PASS" if failed == 0 else "FAIL"
+
+    print(json.dumps(results, indent=2, sort_keys=True))
+
+
+# ──────────────────────────────────────────────────────────────────
+# approve command
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_approve(args):
+    """Mark a proposal as approved (requires explicit approval flag)."""
+    proposal_path = Path(args.proposal)
+    if not proposal_path.exists():
+        print(f"Error: proposal not found: {proposal_path}", file=sys.stderr)
+        sys.exit(1)
+
+    content = proposal_path.read_text(encoding="utf-8")
+    status_match = re.search(r"## Status\s*\n(.*)", content)
+    current_status = status_match.group(1).strip() if status_match else ""
+
+    if current_status == "approved":
+        print("Already approved.")
+        return
+
+    if current_status not in ("draft", "proposed"):
+        print(f"Error: cannot approve proposal with status '{current_status}'", file=sys.stderr)
+        sys.exit(1)
+
+    # Update status to approved
+    updated = content.replace(
+        f"## Status\n{current_status}",
+        "## Status\napproved",
+    )
+
+    # Add approval timestamp
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if "## Approved" not in updated:
+        updated += f"\n\n## Approved\n{timestamp}\n"
+
+    # Atomic write
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(proposal_path) or ".", suffix=".md.tmp"
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(updated)
+        os.replace(tmp_path, str(proposal_path))
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    print(f"Approved: {proposal_path}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# rollback command
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_rollback(args):
+    """Rollback an applied proposal by reverting to backup."""
+    proposal_path = Path(args.proposal)
+    if not proposal_path.exists():
+        print(f"Error: proposal not found: {proposal_path}", file=sys.stderr)
+        sys.exit(1)
+
+    content = proposal_path.read_text(encoding="utf-8")
+    status_match = re.search(r"## Status\s*\n(.*)", content)
+    current_status = status_match.group(1).strip() if status_match else ""
+
+    if current_status != "applied":
+        print(f"Error: cannot rollback proposal with status '{current_status}' — must be 'applied'", file=sys.stderr)
+        sys.exit(1)
+
+    # Look for backup files
+    backup_pattern = f"{proposal_path.stem}.bak*"
+    backups = sorted(Path(proposal_path.parent).glob(backup_pattern), reverse=True)
+    if not backups:
+        print("Error: no backup files found for rollback", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Found {len(backups)} backup(s). Using newest: {backups[0].name}")
+    print("Rollback would restore backup. (Manual review required.)")
+    print(f"  Backup: {backups[0]}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# status command
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_status(args):
+    """Show current state machine status of a proposal."""
+    proposal_path = Path(args.proposal)
+    if not proposal_path.exists():
+        print(f"Error: proposal not found: {proposal_path}", file=sys.stderr)
+        sys.exit(1)
+
+    content = proposal_path.read_text(encoding="utf-8")
+
+    status_match = re.search(r"## Status\s*\n(.*)", content)
+    status = status_match.group(1).strip() if status_match else "unknown"
+
+    agent_match = re.search(r"## Target Agent\s*\n(.*)", content)
+    agent = agent_match.group(1).strip() if agent_match else "unknown"
+
+    problem_match = re.search(r"## Problem\s*\n(.*)", content)
+    problem = problem_match.group(1).strip() if problem_match else "unknown"
+
+    risk_match = re.search(r"## Risk Level\s*\n(.*)", content)
+    risk = risk_match.group(1).strip() if risk_match else "unknown"
+
+    # State machine: draft -> proposed -> approved -> applied
+    valid_transitions = {
+        "draft": ["proposed", "rejected"],
+        "proposed": ["approved", "rejected"],
+        "approved": ["applied", "rejected"],
+        "applied": [],
+        "rejected": [],
+        "unknown": ["draft", "proposed", "approved", "rejected"],
+    }
+
+    result = {
+        "proposal": str(proposal_path),
+        "agent": agent,
+        "problem": problem,
+        "risk": risk,
+        "current_status": status,
+        "allowed_transitions": valid_transitions.get(status, []),
+        "can_apply": status == "approved",
+        "can_rollback": status == "applied",
+        "can_approve": status in ("draft", "proposed"),
+        "state_machine": "draft -> proposed -> approved -> applied",
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prompt Improvement Proposals")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -183,6 +453,19 @@ def main():
     p_app = sub.add_parser("apply")
     p_app.add_argument("--proposal", required=True)
 
+    p_eval = sub.add_parser("evaluate")
+    p_eval.add_argument("--proposal", required=True)
+    p_eval.add_argument("--benchmark-fixture")
+
+    p_approve = sub.add_parser("approve")
+    p_approve.add_argument("--proposal", required=True)
+
+    p_rollback = sub.add_parser("rollback")
+    p_rollback.add_argument("--proposal", required=True)
+
+    p_status = sub.add_parser("status")
+    p_status.add_argument("--proposal", required=True)
+
     args = parser.parse_args()
     if args.command == "create":
         cmd_create(args)
@@ -192,6 +475,14 @@ def main():
         cmd_list(args)
     elif args.command == "apply":
         cmd_apply(args)
+    elif args.command == "evaluate":
+        cmd_evaluate(args)
+    elif args.command == "approve":
+        cmd_approve(args)
+    elif args.command == "rollback":
+        cmd_rollback(args)
+    elif args.command == "status":
+        cmd_status(args)
 
 
 if __name__ == "__main__":

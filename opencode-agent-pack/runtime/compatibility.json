@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0.0",
+  "pack_version": "1.4.0",
+  "supported_opencode_versions": {
+    "minimum": "0.8.0",
+    "tested": "0.12.0",
+    "maximum": null
+  },
+  "required_opencode_features": [
+    "agent_definitions",
+    "task_subagents",
+    "custom_permissions",
+    "project_config"
+  ],
+  "optional_opencode_features": [
+    "plugin_api",
+    "native_explore_agent",
+    "native_general_agent",
+    "session_hooks",
+    "lifecycle_events",
+    "token_metrics",
+    "tool_usage_metrics"
+  ],
+  "plugin_api": {
+    "available": false,
+    "note": "OpenCode plugin API not yet available. Using composite prompt composition as fallback."
+  },
+  "compatibility_checks": {
+    "agent_mode_support": true,
+    "task_allowlist_support": true,
+    "custom_agent_paths": true,
+    "composite_prompt_support": true
+  },
+  "migration_paths": [
+    {
+      "from": "1.3.0",
+      "to": "1.4.0",
+      "changes": [
+        "Added native intelligence bridge (composite prompt composition)",
+        "Added modular runtime prompts",
+        "Added verified memory candidate protocol",
+        "Added fast-path execution",
+        "Added failure classifier and circuit breaker",
+        "Added runtime events stream",
+        "Added benchmark infrastructure",
+        "Added runtime doctor",
+        "Added migration support"
+      ]
+    }
+  ],
+  "warnings": {
+    "plugin_api_missing": "Composite prompt composition is used instead of native plugin API. Prompt composition will be validated on every install.",
+    "unknown_version": "If OpenCode version is newer than tested, compatibility is not guaranteed but unlikely to break."
+  }
+}

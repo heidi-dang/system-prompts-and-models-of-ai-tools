@@ -6,8 +6,10 @@ Commands:
   init <file>        Create empty task ledger
   start --file <f> --task-name <n> [--branch <b>]  Start a new task
   event --file <f> --task-id <id> [event params]    Record a task event
-  finish --file <f> --task-id <id> --status <s> [--score <s>]  Close a task
+  finish --file <f> --task-id <id> --status <s> [--score <s>] [extended params]
+                       Close a task with extended metrics
   report --file <f>                                        Generate metrics report
+  recover --file <f>                                       Identify and recover interrupted tasks
 """
 
 import argparse
@@ -19,7 +21,12 @@ import tempfile
 from datetime import datetime, timezone
 
 VALID_AGENTS = {"heidi", "scout", "planner", "frontend", "backend", "debugger", "auditor"}
-VALID_EVENT_TYPES = {"task_start", "delegation", "tool_result", "test_run", "audit_finding", "memory_candidate", "prompt_proposal", "task_finish", "strategy_selection"}
+VALID_EVENT_TYPES = {
+    "task_start", "delegation", "tool_result", "test_run", "audit_finding",
+    "memory_candidate", "prompt_proposal", "task_finish", "strategy_selection",
+    "context_retrieval", "handoff_recommendation", "strategy_override",
+    "tool_failure", "retry", "escalation", "fast_path_escalation",
+}
 VALID_STATUS = {"pass", "fail", "blocked", "info", "done"}
 
 
@@ -155,13 +162,116 @@ def cmd_finish(args):
         "summary": f"Task completed with status {args.status}",
         "status": args.status,
         "evidence": [],
-        "metrics": {"attempts": 0, "files_changed": 0, "tests_passed": 0, "tests_failed": 0},
+        "metrics": {
+            "attempts": 1,
+            "files_changed": getattr(args, "files_changed", 0) or 0,
+            "tests_passed": getattr(args, "tests_passed", 0) or 0,
+            "tests_failed": getattr(args, "tests_failed", 0) or 0,
+        },
     }
     if args.score is not None:
         event["score"] = args.score
+
+    # Extended metrics
+    available = {}
+
+    if hasattr(args, "token_metrics") and args.token_metrics:
+        try:
+            available["token_metrics"] = json.loads(args.token_metrics)
+        except json.JSONDecodeError:
+            available["token_metrics"] = None
+
+    if hasattr(args, "duration") and args.duration is not None:
+        available["duration_s"] = args.duration
+
+    if hasattr(args, "specialists_used") and args.specialists_used:
+        available["specialists_used"] = args.specialists_used
+
+    if hasattr(args, "audit_result") and args.audit_result:
+        available["audit_result"] = args.audit_result
+
+    if hasattr(args, "final_score") and args.final_score is not None:
+        available["final_score"] = args.final_score
+
+    if hasattr(args, "unresolved_findings") and args.unresolved_findings is not None:
+        available["unresolved_findings"] = args.unresolved_findings
+
+    # Merge available metrics
+    if available:
+        event["metrics"]["available"] = available
+
     records.append(event)
     write_records(args.file, records)
     print(f"Task {args.task_id} finished: {args.status}")
+
+
+# ──────────────────────────────────────────────────────────────────
+# recover command — find and mark interrupted tasks
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_recover(args):
+    """Identify started but unfinished tasks and mark them interrupted."""
+    records = read_records(args.file)
+    if not records:
+        print("No records to recover.")
+        return
+
+    # Find task IDs that have a start but no finish
+    task_states = {}
+    for r in records:
+        tid = r.get("task_id")
+        if not tid:
+            continue
+        if tid not in task_states:
+            task_states[tid] = {"started": False, "finished": False, "events": []}
+        task_states[tid]["events"].append(r)
+        if r.get("type") == "task_start":
+            task_states[tid]["started"] = True
+        if r.get("type") == "task_finish":
+            task_states[tid]["finished"] = True
+
+    interrupted = []
+    for tid, state in task_states.items():
+        if state["started"] and not state["finished"]:
+            interrupted.append(tid)
+
+    if not interrupted:
+        print("No interrupted tasks found.")
+        return
+
+    print(f"Found {len(interrupted)} interrupted task(s):")
+    for tid in interrupted:
+        print(f"  Marking interrupted: {tid}")
+
+        # Check if already marked
+        already_marked = any(
+            r.get("type") == "task_finish" and r.get("status") == "interrupted"
+            for r in task_states[tid]["events"]
+        )
+        if already_marked:
+            print(f"    (already marked)")
+            continue
+
+        create_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        event_id = stable_id(tid, "interrupted", create_time)
+        if any(r.get("id") == event_id for r in records):
+            continue
+
+        event = {
+            "id": event_id,
+            "task_id": tid,
+            "created_at": create_time,
+            "agent": "heidi",
+            "type": "task_finish",
+            "summary": "Task interrupted (detected by recover)",
+            "status": "interrupted",
+            "evidence": [],
+            "metrics": {"attempts": 0, "files_changed": 0, "tests_passed": 0, "tests_failed": 0},
+        }
+        records.append(event)
+
+    write_records(args.file, records)
+    print(f"Recovery complete. {len(interrupted)} task(s) marked.")
 
 
 def cmd_report(args):
@@ -259,9 +369,21 @@ def main():
     p_finish.add_argument("--task-id", required=True)
     p_finish.add_argument("--status", required=True, choices=VALID_STATUS)
     p_finish.add_argument("--score", type=float)
+    p_finish.add_argument("--files-changed", type=int, default=0)
+    p_finish.add_argument("--tests-passed", type=int, default=0)
+    p_finish.add_argument("--tests-failed", type=int, default=0)
+    p_finish.add_argument("--duration", type=float)
+    p_finish.add_argument("--specialists-used")
+    p_finish.add_argument("--audit-result")
+    p_finish.add_argument("--final-score", type=float)
+    p_finish.add_argument("--unresolved-findings", type=int)
+    p_finish.add_argument("--token-metrics")
 
     p_report = sub.add_parser("report", help="Generate metrics report")
     p_report.add_argument("--file", required=True)
+
+    p_recover = sub.add_parser("recover", help="Recover interrupted tasks")
+    p_recover.add_argument("--file", required=True)
 
     args = parser.parse_args()
 
@@ -275,6 +397,8 @@ def main():
         cmd_finish(args)
     elif args.command == "report":
         cmd_report(args)
+    elif args.command == "recover":
+        cmd_recover(args)
 
 
 if __name__ == "__main__":

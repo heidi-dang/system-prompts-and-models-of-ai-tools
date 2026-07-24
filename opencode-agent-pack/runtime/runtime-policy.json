@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0.0",
+  "runtime": {
+    "context_injection": {
+      "enabled": true,
+      "max_results": 15,
+      "max_chars": 2000,
+      "include_rules": true,
+      "include_commands": true,
+      "include_memory": true,
+      "include_architecture": true,
+      "include_test_locations": true
+    },
+    "strategy_selection": {
+      "enabled": true,
+      "write_to_ledger": true,
+      "allow_override": true,
+      "override_records_evidence": true
+    },
+    "task_ledger": {
+      "enabled": true,
+      "auto_start": true,
+      "auto_finish": true,
+      "log_delegations": true,
+      "log_retries": true,
+      "log_audits": true
+    },
+    "runtime_events": {
+      "enabled": true,
+      "max_file_size_bytes": 1048576,
+      "rotation_count": 5,
+      "log_startup": true,
+      "log_strategy": true,
+      "log_delegations": true,
+      "log_completions": true
+    },
+    "fast_path": {
+      "enabled": true,
+      "max_files": 2,
+      "skip_scout": true,
+      "skip_planner": true,
+      "skip_auditor": true,
+      "minimal_validation": true,
+      "escalation_on_scope_change": true
+    },
+    "verified_memory": {
+      "enabled": true,
+      "require_evidence": true,
+      "auto_dedup": true,
+      "reject_unsupported": true,
+      "promotion_requires_approval": true
+    },
+    "prompt_proposals": {
+      "enabled": true,
+      "require_evaluation": true,
+      "require_approval": true,
+      "auto_apply_disabled": true,
+      "regression_threshold": "no_critical_regression"
+    },
+    "proactive_audit": {
+      "enabled": true,
+      "auto_triggers": [
+        "agent_files_changed",
+        "runtime_files_changed",
+        "permissions_changed",
+        "context_schema_changed",
+        "configured_interval_elapsed",
+        "ledger_failures_threshold"
+      ],
+      "skip_trivial_tasks": true,
+      "read_only": true
+    },
+    "benchmark": {
+      "enabled": true,
+      "mock_mode_available": true,
+      "acceptance_thresholds": {
+        "fast_path_median_time_ratio": 1.2,
+        "fast_path_correctness_not_lower": true,
+        "complex_correctness_not_lower": true,
+        "unrelated_diff_not_higher": true,
+        "audit_precision_not_lower": true,
+        "no_critical_regression": true
+      }
+    }
+  }
+}

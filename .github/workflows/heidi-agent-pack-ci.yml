@@ -41,6 +41,8 @@ jobs:
         run: shellcheck agent.sh
       - name: Validate agent definitions
         run: python3 tests/validate_agents.py
+      - name: Prompt consistency check
+        run: python3 opencode-agent-pack/scripts/prompt_consistency.py --check
       - name: Generated prompt check
         run: python3 opencode-agent-pack/scripts/gen-prompts.py --check
       - name: Prompt size stats

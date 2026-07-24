@@ -39,6 +39,15 @@ jobs:
         run: bash -n agent.sh
       - name: ShellCheck
         run: shellcheck agent.sh
+      - name: Heidi Runtime Plugin — typecheck
+        run: |
+          cd packages/opencode-heidi-runtime
+          npm ci 2>&1 | tail -3
+          npx tsc --noEmit
+      - name: Heidi Runtime Plugin — tests
+        run: |
+          cd packages/opencode-heidi-runtime
+          npx vitest run
       - name: Validate agent definitions
         run: python3 tests/validate_agents.py
       - name: Generated prompt check

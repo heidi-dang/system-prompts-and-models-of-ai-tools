@@ -1,0 +1,48 @@
+{
+  "name": "@heidi/opencode-runtime",
+  "version": "1.0.0-phase1",
+  "description": "Heidi Core Runtime Plugin — deterministic task lifecycle, routing, governance, and audit for OpenCode",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./doctor": {
+      "types": "./dist/doctor/index.d.ts",
+      "import": "./dist/doctor/index.js"
+    },
+    "./test-utils": {
+      "types": "./dist/test-utils.d.ts",
+      "import": "./dist/test-utils.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "doctor": "node dist/doctor/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "zod": "^3.23.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.18.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.4",
+    "@types/better-sqlite3": "^7.6.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "eslint": "^9.0.0"
+  }
+}

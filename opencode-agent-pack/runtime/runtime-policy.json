@@ -23,7 +23,8 @@
       "auto_finish": true,
       "log_delegations": true,
       "log_retries": true,
-      "log_audits": true
+      "log_audits": true,
+      "log_token_usage": true
     },
     "runtime_events": {
       "enabled": true,
@@ -81,6 +82,22 @@
         "audit_precision_not_lower": true,
         "no_critical_regression": true
       }
+    },
+    "consumption": {
+      "max_total_tokens": 1500000,
+      "max_input_tokens_per_request": 100000,
+      "max_output_tokens_per_request": 8000,
+      "max_reasoning_tokens_per_request": 12000,
+      "max_model_calls": 40,
+      "max_subagent_calls": 8,
+      "max_calls_per_agent": 3,
+      "max_parallel_agents": 2,
+      "max_audit_cycles": 1,
+      "max_equivalent_retries": 2,
+      "warning_percent": 70,
+      "hard_stop_percent": 100,
+      "delegation_context_limit": 1500,
+      "delegation_context_max": 4000
     }
   }
 }

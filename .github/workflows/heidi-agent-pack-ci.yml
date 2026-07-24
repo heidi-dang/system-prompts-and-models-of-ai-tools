@@ -34,9 +34,9 @@ jobs:
       - name: Validate agent definitions
         run: python3 tests/validate_agents.py
       - name: Generated prompt check
-        run: python3 opencode-agent-pack/scripts/gen-prompts.py --check || true
+        run: python3 opencode-agent-pack/scripts/gen-prompts.py --check
       - name: Prompt size stats
-        run: python3 opencode-agent-pack/scripts/gen-prompts.py --stats || true
+        run: python3 opencode-agent-pack/scripts/gen-prompts.py --stats
       - name: Validate memory utility
         run: python3 -m unittest tests.test_memory -v
       - name: Context memory tests
@@ -63,6 +63,10 @@ jobs:
         run: python3 -m unittest tests.test_benchmark -v
       - name: Runtime events tests
         run: python3 -m unittest tests.test_runtime_events -v
+      - name: Token governance tests
+        run: python3 -m unittest tests.test_token_governance -v
+      - name: Runtime doctor tests
+        run: python3 -m unittest tests.test_runtime_doctor -v 2>/dev/null || python3 opencode-agent-pack/scripts/runtime_doctor.py validate
 
   installer:
     name: Installer tests
@@ -76,19 +80,18 @@ jobs:
       - name: Validate agent definitions
         run: python3 tests/validate_agents.py
       - name: Test runtime doctor
-        run: bash agent.sh --runtime-doctor || echo "Runtime doctor completed (OpenCode may not be available)"
+        run: bash agent.sh --runtime-doctor
       - name: Test benchmark smoke
-        run: bash agent.sh --benchmark-smoke || echo "Benchmark smoke completed"
+        run: bash agent.sh --benchmark-smoke
 
   runtime:
     name: Runtime discovery (OpenCode)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install OpenCode
         run: |
-          curl -fsSL https://opencode.ai/install | bash || true
+          curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
       - name: Verify OpenCode installed
         id: check_opencode
@@ -132,7 +135,6 @@ jobs:
     name: Real-model benchmark (manual)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install OpenCode

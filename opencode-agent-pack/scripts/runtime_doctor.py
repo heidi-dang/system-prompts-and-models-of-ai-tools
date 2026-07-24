@@ -55,6 +55,99 @@ def _status(passed, label, detail=None):
 
 
 # ──────────────────────────────────────────────────────────────────
+# Token governance checks
+# ──────────────────────────────────────────────────────────────────
+
+def check_token_governance():
+    """Run all token governance checks.
+
+    Returns list of (label, passed, detail) tuples.
+    """
+    results = []
+
+    # 1. Token policy present and valid
+    policy_path = Path(__file__).parent.parent / "runtime" / "runtime-policy.json"
+    policy_present = policy_path.is_file()
+    policy_valid = False
+    if policy_present:
+        try:
+            with open(policy_path) as f:
+                policy = json.load(f)
+            consumption = policy.get("runtime", {}).get("consumption", {})
+            policy_valid = bool(consumption)
+        except Exception:
+            pass
+    results.append(_status(policy_present, "Token policy present",
+                           "not found" if not policy_present else None))
+    results.append(_status(policy_valid, "Token policy valid",
+                           "no consumption section" if policy_present and not policy_valid else None))
+
+    # 2. Budget manager module exists
+    budget_script = Path(__file__).parent / "token_budget.py"
+    results.append(_status(budget_script.is_file(), "Budget manager module exists",
+                           "token_budget.py not found" if not budget_script.is_file() else None))
+
+    # 3. Token estimator module exists
+    estimator_script = Path(__file__).parent / "token_estimator.py"
+    results.append(_status(estimator_script.is_file(), "Token estimator module exists",
+                           "token_estimator.py not found" if not estimator_script.is_file() else None))
+
+    # 4. Delegation handoff module exists
+    handoff_script = Path(__file__).parent / "delegation_handoff.py"
+    results.append(_status(handoff_script.is_file(), "Delegation handoff module exists",
+                           "delegation_handoff.py not found" if not handoff_script.is_file() else None))
+
+    # 5. Delegation payload capped
+    if handoff_script.is_file():
+        try:
+            from delegation_handoff import DEFAULT_DELEGATION_CONTEXT_LIMIT, MAX_DELEGATION_CONTEXT_LIMIT
+            capped = DEFAULT_DELEGATION_CONTEXT_LIMIT <= 1500 and MAX_DELEGATION_CONTEXT_LIMIT <= 4000
+            results.append(_status(capped, "Delegation payload capped",
+                                   f"default={DEFAULT_DELEGATION_CONTEXT_LIMIT}, max={MAX_DELEGATION_CONTEXT_LIMIT}" if not capped else None))
+        except Exception as e:
+            results.append(_status(False, "Delegation payload capped", str(e)))
+
+    # 6. Subagent limits enforced in policy
+    subagent_limit = consumption.get("max_subagent_calls") if policy_valid else None
+    results.append(_status(subagent_limit is not None and subagent_limit <= 8,
+                           "Subagent limits enforced",
+                           f"max_subagent_calls={subagent_limit}" if subagent_limit else "no policy"))
+
+    # 7. Retry circuit breaker active
+    retry_limit = consumption.get("max_equivalent_retries") if policy_valid else None
+    results.append(_status(retry_limit is not None and retry_limit <= 2,
+                           "Retry circuit breaker active",
+                           f"max_equivalent_retries={retry_limit}" if retry_limit else "no policy"))
+
+    # 8. Audit-cycle limit active
+    audit_limit = consumption.get("max_audit_cycles") if policy_valid else None
+    results.append(_status(audit_limit is not None and audit_limit <= 1,
+                           "Audit-cycle limit active",
+                           f"max_audit_cycles={audit_limit}" if audit_limit else "no policy"))
+
+    # 9. No duplicate orchestration layer
+    # Check that heidi.md doesn't have conflicting token-policy defaults
+    heidi_md = Path(__file__).parent.parent / "agents" / "heidi.md"
+    has_conflict = False
+    if heidi_md.is_file():
+        content = heidi_md.read_text()
+        # Check for conflicting defaults (e.g., different max values in different places)
+        import re
+        max_total_matches = re.findall(r'max_total_tokens["\s:]+(\d+)', content)
+        if len(set(max_total_matches)) > 1:
+            has_conflict = True
+    results.append(_status(not has_conflict, "No conflicting token-policy defaults",
+                           "conflicting max_total_tokens values found" if has_conflict else None))
+
+    # 10. Task ledger writes token usage
+    ledger_enabled = policy.get("runtime", {}).get("task_ledger", {}).get("log_token_usage", False) if policy_present else False
+    results.append(_status(ledger_enabled, "Task ledger writes token usage",
+                           "log_token_usage not enabled" if policy_present and not ledger_enabled else None))
+
+    return results
+
+
+# ──────────────────────────────────────────────────────────────────
 # native-prompt command
 # ──────────────────────────────────────────────────────────────────
 
@@ -67,6 +160,7 @@ def probe_native_prompt():
       3. Selected model is preserved.
       4. Build agent is unchanged.
       5. Plan agent is unchanged.
+      6. Token governance controls are active.
     """
     results = []
 
@@ -77,7 +171,114 @@ def probe_native_prompt():
         print("Selected model preserved: UNAVAILABLE")
         print("Build unchanged: UNAVAILABLE")
         print("Plan unchanged: UNAVAILABLE")
-        return 0
+    else:
+        # Attempt to gather runtime config
+        config_dir = os.environ.get(
+            "OPENCODE_CONFIG_DIR",
+            os.path.join(os.path.expanduser("~"), ".config", "opencode"),
+        )
+        config_path = os.path.join(config_dir, "opencode.json")
+
+        heidi_markers = ["Heidi", "heidi", "HEIDI", "orchestration layer"]
+        build_markers = ["Build", "build", "BUILD"]
+        plan_markers = ["Plan", "plan", "PLAN"]
+
+        has_config = os.path.isfile(config_path)
+        config = {}
+
+        if has_config:
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    raw = f.read()
+                config = json.loads(raw)
+            except Exception:
+                config = {}
+
+        # Check 1: Native provider prompt presence
+        prompt_present = bool(config.get("prompt") or
+                              config.get("system_prompt") or
+                              config.get("agent", {}).get("heidi", {}).get("prompt"))
+        if prompt_present:
+            results.append(_status(True, "Native provider prompt"))
+        else:
+            prompt_present = has_config and '"prompt"' in raw
+            results.append(_status(prompt_present, "Native provider prompt",
+                                   "no prompt key found" if not prompt_present else None))
+
+        # Check 2: Heidi orchestration layer present exactly once
+        orchestration_count = 0
+        if has_config:
+            orchestration_count += raw.count("orchestrat")
+            orchestration_count += raw.count("Heidi")
+        agent_dir = Path(config_dir) / "agents"
+        if agent_dir.is_dir():
+            for agent_file in agent_dir.glob("*.md"):
+                try:
+                    content = agent_file.read_text(encoding="utf-8")
+                    for m in heidi_markers:
+                        orchestration_count += content.count(m)
+                except Exception:
+                    pass
+        project_agent_dir = Path(os.getcwd()) / ".opencode" / "agents"
+        if project_agent_dir.is_dir():
+            for agent_file in project_agent_dir.glob("*.md"):
+                try:
+                    content = agent_file.read_text(encoding="utf-8")
+                    for m in heidi_markers:
+                        orchestration_count += content.count(m)
+                except Exception:
+                    pass
+
+        heidi_ok = orchestration_count > 0
+        dup_ok = orchestration_count <= 50
+        results.append(_status(heidi_ok, "Heidi orchestration layer",
+                               "not found" if not heidi_ok else None))
+        results.append(_status(dup_ok, "Duplicate orchestration layer",
+                               "potential duplicates detected" if not dup_ok else None))
+
+        # Check 3: Selected model preserved
+        model_preserved = True
+        if has_config:
+            model_preserved = "model" in config or "default_model" in config
+        results.append(_status(model_preserved, "Selected model preserved" if model_preserved else "Selected model preserved",
+                               "no model config found" if not model_preserved else None))
+
+        # Check 4 & 5: Build and Plan unchanged
+        build_unchanged = True
+        plan_unchanged = True
+        if agent_dir.is_dir():
+            build_file = agent_dir / "build.md"
+            plan_file = agent_dir / "plan.md"
+            if build_file.exists():
+                try:
+                    content = build_file.read_text(encoding="utf-8")
+                    for m in build_markers:
+                        if content.count(m) < 1:
+                            build_unchanged = False
+                except Exception:
+                    pass
+            if plan_file.exists():
+                try:
+                    content = plan_file.read_text(encoding="utf-8")
+                    for m in plan_markers:
+                        if content.count(m) < 1:
+                            plan_unchanged = False
+                except Exception:
+                    pass
+        results.append(_status(build_unchanged, "Build unchanged"))
+        results.append(_status(plan_unchanged, "Plan unchanged"))
+
+    # Token governance checks always run
+    gov_results = check_token_governance()
+    if gov_results:
+        print("\n--- Token Governance ---")
+        for line in gov_results:
+            print(line)
+
+    for line in results:
+        print(line)
+
+    return 0 if all("PASS" in r for r in results) else 1
 
     # Attempt to gather runtime config
     config_dir = os.environ.get(
@@ -180,6 +381,13 @@ def probe_native_prompt():
 
     for line in results:
         print(line)
+
+    # Token governance checks
+    gov_results = check_token_governance()
+    if gov_results:
+        print("\n--- Token Governance ---")
+        for line in gov_results:
+            print(line)
 
     return 0 if all("PASS" in r for r in results) else 1
 

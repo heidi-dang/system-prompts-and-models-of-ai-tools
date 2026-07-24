@@ -172,3 +172,80 @@ class TestContextMemory(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── Budget enforcement tests ──────────────────────────────────
+
+class TestContextMemoryBudgetEnforcement(unittest.TestCase):
+
+    def test_retrieve_respects_char_budget(self):
+        """Test that retrieve enforces max_chars as a hard stop."""
+        tmpdir = Path(tempfile.mkdtemp())
+        try:
+            index_path = tmpdir / "context-index.json"
+            files = []
+            for i in range(20):
+                files.append({
+                    "path": f"file_{i}.py",
+                    "size": 1000,
+                    "sha256": "a" * 64,
+                    "language": "Python",
+                    "is_test": False,
+                    "headings": [f"Heading {i} " * 20],
+                })
+            index_path.write_text(json.dumps({"schema_version": "2.0.0", "files": files}))
+
+            rc, out, _ = run(
+                "retrieve", "--index", str(index_path), "--query", "test",
+                "--max-results", "50", "--max-chars", "500", "--format", "runtime",
+            )
+            self.assertEqual(rc, 0)
+            result = json.loads(out)
+            total_chars = result.get("total_chars", 0)
+            self.assertLessEqual(total_chars, 500,
+                f"Context retrieval exceeded char budget: {total_chars} > 500")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_retrieve_empty_results(self):
+        """Test retrieval with no matching results."""
+        tmpdir = Path(tempfile.mkdtemp())
+        try:
+            index_path = tmpdir / "context-index.json"
+            index_path.write_text(json.dumps({"schema_version": "2.0.0", "files": []}))
+
+            rc, out, _ = run(
+                "retrieve", "--index", str(index_path), "--query", "nonexistent",
+                "--format", "runtime",
+            )
+            self.assertEqual(rc, 0)
+            result = json.loads(out)
+            self.assertEqual(len(result["results"]), 0)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_retrieve_oversized_single_result(self):
+        """Test that a single result exceeding the budget is not added."""
+        tmpdir = Path(tempfile.mkdtemp())
+        try:
+            index_path = tmpdir / "context-index.json"
+            files = [{
+                "path": "big_file.py",
+                "size": 100000,
+                "sha256": "b" * 64,
+                "language": "Python",
+                "is_test": False,
+                "headings": ["X" * 1000],
+            }]
+            index_path.write_text(json.dumps({"schema_version": "2.0.0", "files": files}))
+
+            rc, out, _ = run(
+                "retrieve", "--index", str(index_path), "--query", "big",
+                "--max-results", "10", "--max-chars", "100", "--format", "runtime",
+            )
+            self.assertEqual(rc, 0)
+            result = json.loads(out)
+            # The single result exceeds the 100-char budget, so it should not be added
+            self.assertEqual(len(result["results"]), 0)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)

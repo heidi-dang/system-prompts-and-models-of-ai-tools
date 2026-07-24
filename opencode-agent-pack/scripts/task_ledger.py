@@ -26,6 +26,7 @@ VALID_EVENT_TYPES = {
     "memory_candidate", "prompt_proposal", "task_finish", "strategy_selection",
     "context_retrieval", "handoff_recommendation", "strategy_override",
     "tool_failure", "retry", "escalation", "fast_path_escalation",
+    "token_usage", "budget_warning", "budget_hard_stop", "audit_cycle_blocked",
 }
 VALID_STATUS = {"pass", "fail", "blocked", "info", "done"}
 
@@ -181,6 +182,15 @@ def cmd_finish(args):
         except json.JSONDecodeError:
             available["token_metrics"] = None
 
+    if hasattr(args, "budget_warning") and args.budget_warning is not None:
+        available["budget_warning"] = args.budget_warning
+
+    if hasattr(args, "budget_hard_stop") and args.budget_hard_stop is not None:
+        available["budget_hard_stop"] = args.budget_hard_stop
+
+    if hasattr(args, "budget_percent") and args.budget_percent is not None:
+        available["budget_percent"] = args.budget_percent
+
     if hasattr(args, "duration") and args.duration is not None:
         available["duration_s"] = args.duration
 
@@ -335,6 +345,19 @@ def cmd_report(args):
     print(f"Memory candidates: {memory_candidates}")
     print(f"Prompt proposals: {prompt_proposals}")
     print(f"Total retries: {total_retries}")
+
+    # Token usage summary
+    token_events = [r for r in records if r.get("type") == "token_usage"]
+    if token_events:
+        total_in = sum(r.get("metrics", {}).get("input_tokens", 0) for r in token_events)
+        total_out = sum(r.get("metrics", {}).get("output_tokens", 0) for r in token_events)
+        total_cached = sum(r.get("metrics", {}).get("cached_input_tokens", 0) for r in token_events)
+        print(f"\nToken Usage:")
+        print(f"  Total input tokens: {total_in}")
+        print(f"  Total output tokens: {total_out}")
+        print(f"  Total cached input tokens: {total_cached}")
+        print(f"  Total tokens: {total_in + total_out}")
+
     print(f"\nEvents by agent:")
     for k, v in sorted(events_by_agent.items()):
         print(f"  {k}: {v}")
@@ -378,6 +401,9 @@ def main():
     p_finish.add_argument("--final-score", type=float)
     p_finish.add_argument("--unresolved-findings", type=int)
     p_finish.add_argument("--token-metrics")
+    p_finish.add_argument("--budget-warning", type=json.loads, default=None)
+    p_finish.add_argument("--budget-hard-stop", type=json.loads, default=None)
+    p_finish.add_argument("--budget-percent", type=float)
 
     p_report = sub.add_parser("report", help="Generate metrics report")
     p_report.add_argument("--file", required=True)

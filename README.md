@@ -8,7 +8,7 @@ cd system-prompts-and-models-of-ai-tools
 ./agent.sh --repair
 ```
 
-See [opencode-agent-pack/README.md](opencode-agent-pack/README.md) for full documentation: architecture, agent modes, permissions, task identifiers, JSON config, rules and memory, diagnostics, testing, uninstall, and rollback.
+See [opencode-agent-pack/README.md](opencode-agent-pack/README.md) for full documentation: architecture, agent modes, permissions, task identifiers, JSON config, rules and memory, diagnostics, testing, uninstall, rollback, and token governance.
 
 ---
 

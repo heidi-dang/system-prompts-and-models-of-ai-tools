@@ -511,27 +511,29 @@ def cmd_retrieve(args):
     # Sort by score descending
     results.sort(key=lambda x: -x[0])
 
-    # Apply max_results, then apply character budget
+    # Apply character budget FIRST, then max_results
     selected = []
     total_chars = 0
     for score, entry in results:
+        # Check if adding this entry would exceed the character budget
+        entry_chars = len(entry.get("path", "")) + sum(len(h) for h in entry.get("headings", []))
+        if total_chars + entry_chars > max_chars:
+            break  # stop adding results that would exceed budget
+        selected.append(entry)
+        total_chars += entry_chars
         if len(selected) >= max_results:
             break
-        selected.append(entry)
-        # Estimate char consumption: path + headings
-        entry_chars = len(entry.get("path", "")) + sum(len(h) for h in entry.get("headings", []))
-        total_chars += entry_chars
 
     # Output
     if args.format == "runtime":
-        print(json.dumps({"results": selected}, indent=2, sort_keys=True))
+        print(json.dumps({"results": selected, "total_chars": total_chars, "budget": max_chars}, indent=2, sort_keys=True))
     else:
-        print(f"Results for '{query}' ({len(selected)} results, ~{min(total_chars, max_chars)} chars):")
+        print(f"Results for '{query}' ({len(selected)} results, {total_chars} chars / {max_chars} budget):")
         for entry in selected:
             hdr = ", ".join(entry.get("headings", [])[:3])
             print(f"  [{entry.get('language', '?')}] {entry['path']} (size={entry['size']}, headings=[{hdr}])")
 
-    if not selected:
+    if not selected and args.format != "runtime":
         print(f"(no matches for '{query}')")
 
 

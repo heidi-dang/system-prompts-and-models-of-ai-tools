@@ -797,26 +797,73 @@ install_mode() {
       ;;
   esac
 
-  # 3. Install runtime orchestration files
+  # 3. Install runtime orchestration files to private (non-discoverable) directory
+  #    IMPORTANT: Runtime files MUST NOT go into the agent discovery directory
+  #    ($OFFICIAL_GLOBAL / $OFFICIAL_PROJECT) because OpenCode recursively scans
+  #    *.md files there and would expose internal prompt fragments as selectable agents.
   local heidi_dir
   heidi_dir="$(pwd)/.heidi"
   if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime" ]; then
     echo "=== Installing Runtime Orchestration ==="
+
+    # Managed runtime files (known paths only, no wildcards for safety)
+    MANAGED_RUNTIME_FILES=(
+      "heidi-orchestration.md"
+      "orchestration.prompt.md"
+      "compatibility.json"
+      "recovery-policy.json"
+      "runtime-policy.json"
+    )
+
+    # Migrate: remove stale runtime/ directories from agent discovery paths
     for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
-      if [ -d "$target_dir" ]; then
-        mkdir -p "$target_dir/runtime"
-        # Backup existing runtime if present
-        if [ -n "$(ls -A "$target_dir/runtime" 2>/dev/null)" ]; then
-          rt_backup="$target_dir/runtime.bak.$(date +%Y%m%d-%H%M%S)"
-          cp -r "$target_dir/runtime" "$rt_backup"
-          echo "Backed up existing runtime -> $rt_backup"
-        fi
-        cp -r "$SCRIPT_DIR/opencode-agent-pack/runtime/"* "$target_dir/runtime/"
+      if [ -d "$target_dir/runtime" ]; then
+        echo "  Migrating: removing stale runtime/ from $target_dir (moved to private dir)"
+        cp -r "$target_dir/runtime" "$target_dir/runtime.migrated.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+        rm -rf "$target_dir/runtime"
       fi
     done
-    # Also install to .heidi for project-local runtime
-    mkdir -p "$heidi_dir/runtime"
-    cp -r "$SCRIPT_DIR/opencode-agent-pack/runtime/"* "$heidi_dir/runtime/"
+
+    # Determine private runtime directory
+    local runtime_base
+    if [ -n "${OPENCODE_CONFIG_DIR:-}" ]; then
+      runtime_base="$CONFIG_DIR"
+    else
+      runtime_base="$HOME/.config/opencode"
+    fi
+    local private_runtime_dir="$runtime_base/heidi-runtime"
+    local private_prompts_dir="$private_runtime_dir/prompts"
+
+    # Install runtime files to private directory
+    mkdir -p "$private_runtime_dir"
+    for f in "${MANAGED_RUNTIME_FILES[@]}"; do
+      src="$SCRIPT_DIR/opencode-agent-pack/runtime/$f"
+      if [ -f "$src" ]; then
+        cp "$src" "$private_runtime_dir/$f"
+      fi
+    done
+    # Install prompt modules to private prompts directory
+    mkdir -p "$private_prompts_dir"
+    if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime/prompts" ]; then
+      for f in "$SCRIPT_DIR/opencode-agent-pack/runtime/prompts"/*.md; do
+        if [ -f "$f" ]; then
+          cp "$f" "$private_prompts_dir/"
+        fi
+      done
+    fi
+    echo "  Private runtime dir: $private_runtime_dir"
+
+    # Also install to .heidi for project-local runtime (internal, not agent-discoverable)
+    rm -rf "$heidi_dir/runtime"
+    mkdir -p "$heidi_dir/runtime/prompts"
+    cp "$SCRIPT_DIR/opencode-agent-pack/runtime/"*.md "$heidi_dir/runtime/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/opencode-agent-pack/runtime/"*.json "$heidi_dir/runtime/" 2>/dev/null || true
+    if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime/prompts" ]; then
+      for f in "$SCRIPT_DIR/opencode-agent-pack/runtime/prompts"/*.md; do
+        [ -f "$f" ] && cp "$f" "$heidi_dir/runtime/prompts/"
+      done
+    fi
+    echo "  Project-local runtime: $heidi_dir/runtime"
     echo "Runtime orchestration installed."
   else
     echo "(runtime/ directory not found, skipping runtime orchestration)"
@@ -1162,23 +1209,30 @@ if [ "$DO_UNINSTALL" = true ]; then
   echo ""
   uninstall_from "$OFFICIAL_GLOBAL" "global official" "$CONFIG_DIR/opencode.json"
   uninstall_from "$OFFICIAL_PROJECT" "project official" "$(pwd)/opencode.json"
-  # Remove runtime orchestration files from targets
+  # Remove stale runtime/ directories from agent discovery paths
   for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
-    if [ -d "$target_dir" ]; then
-      # Remove runtime/ files copied from opencode-agent-pack
-      if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime" ]; then
-        for f in $(cd "$SCRIPT_DIR/opencode-agent-pack/runtime" && find . -type f 2>/dev/null); do
-          rm -f "$target_dir/runtime/$f"
-        done
-        rmdir "$target_dir/runtime" 2>/dev/null || true
-      fi
-      # Remove plugins/ files copied from opencode-agent-pack
-      if [ -d "$SCRIPT_DIR/opencode-agent-pack/plugins" ]; then
-        for f in $(cd "$SCRIPT_DIR/opencode-agent-pack/plugins" && find . -type f 2>/dev/null); do
-          rm -f "$target_dir/plugins/$f"
-        done
-        rmdir "$target_dir/plugins" 2>/dev/null || true
-      fi
+    if [ -d "$target_dir/runtime" ]; then
+      echo "  Removing stale runtime/ from $target_dir"
+      rm -rf "$target_dir/runtime"
+    fi
+  done
+  # Remove private heidi-runtime directory
+  runtime_base=""
+  if [ -n "${OPENCODE_CONFIG_DIR:-}" ]; then
+    runtime_base="$CONFIG_DIR"
+  else
+    runtime_base="$HOME/.config/opencode"
+  fi
+  private_runtime_dir="$runtime_base/heidi-runtime"
+  if [ -d "$private_runtime_dir" ]; then
+    echo "  Removing private runtime: $private_runtime_dir"
+    rm -rf "$private_runtime_dir"
+  fi
+  # Also remove plugins/ files from agent discovery paths (same concern as runtime)
+  for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+    if [ -d "$target_dir/plugins" ]; then
+      echo "  Removing plugins/ from $target_dir"
+      rm -rf "$target_dir/plugins"
     fi
   done
   # Remove managed .heidi files (not user memory/rules)

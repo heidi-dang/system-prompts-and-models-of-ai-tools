@@ -404,6 +404,63 @@ def cmd_validate(args):
     gov_results = check_token_governance()
     results.extend(gov_results)
 
+    # ── Agent registry checks ────────────────────────────────────
+    # Verify no internal runtime prompt files in agent discovery directories
+
+    # Public agent allowlist (agents that are allowed to be in the agent dir)
+    PUBLIC_AGENTS = {"heidi", "frontend", "backend", "debugger", "auditor", "planner", "scout",
+                     "build", "plan"}
+
+    # Check global agent directory
+    global_agent_dir = Path(config_dir) / "agents"
+    if global_agent_dir.is_dir():
+        for f in sorted(global_agent_dir.rglob("*.md")):
+            rel = f.relative_to(global_agent_dir)
+            # Check if file is in a subdirectory (internal runtime prompts are nested)
+            if rel.parent != Path("."):
+                results.append(_status_fail(
+                    f"Agent registry: {rel}",
+                    f"nested in agent directory (should be in private runtime dir)"
+                ))
+
+    # Check project agent directory
+    project_agent_dir = Path(os.getcwd()) / ".opencode" / "agents"
+    if project_agent_dir.is_dir():
+        for f in sorted(project_agent_dir.rglob("*.md")):
+            rel = f.relative_to(project_agent_dir)
+            if rel.parent != Path("."):
+                results.append(_status_fail(
+                    f"Agent registry: .opencode/agents/{rel}",
+                    f"nested in agent directory (should be in private runtime dir)"
+                ))
+
+    # Check private runtime prompt directory
+    private_runtime_dir = Path(config_dir) / "heidi-runtime"
+    if private_runtime_dir.is_dir():
+        prompts_dir = private_runtime_dir / "prompts"
+        if prompts_dir.is_dir():
+            expected_prompts = {"core.md", "routing.md", "orchestration.md", "memory.md",
+                                "verification.md", "resilience.md", "reporting.md", "fast-path.md"}
+            found = set(f.name for f in prompts_dir.iterdir() if f.suffix == ".md")
+            missing = expected_prompts - found
+            if missing:
+                results.append(_status_skip("Private runtime prompts",
+                                            f"some modules in heidi-runtime/prompts: {', '.join(sorted(found))}"))
+            else:
+                results.append(_status_pass("Private runtime prompts"))
+        else:
+            if mode == "installed":
+                results.append(_status_fail("Private runtime prompts", "heidi-runtime/prompts not found"))
+            else:
+                results.append(_status_skip("Private runtime prompts",
+                                            "heidi-runtime/prompts not found (expected in isolated CI)"))
+    else:
+        if mode == "installed":
+            results.append(_status_fail("Private runtime directory", "heidi-runtime not found"))
+        else:
+            results.append(_status_skip("Private runtime directory",
+                                        "heidi-runtime not found (expected in isolated CI)"))
+
     print("\n--- Validation ---")
     return _print_summary(results)
 

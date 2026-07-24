@@ -66,14 +66,61 @@ class TestRuntimeDoctor(unittest.TestCase):
 
     def test_validate_exit_code_on_failure(self):
         """Doctor should return non-zero when checks fail."""
-        # When OpenCode is not available, native-prompt returns 0 with UNAVAILABLE
-        # But token governance checks should still run
         rc, out, err = run_doctor("native-prompt")
         # Token governance checks should pass (policy exists, modules exist)
-        # If they fail, exit code should be non-zero
-        gov_lines = [l for l in out.split('\n') if 'Token governance' in l or 'FAIL' in l]
-        # We just verify the doctor runs and reports
         self.assertIsInstance(rc, int)
+
+    # ── Agent-registry checks ────────────────────────────────────
+
+    def _run_validate_isolated(self, tmpdir, mode="isolated"):
+        """Run validate with OPENCODE_CONFIG_DIR pointing to tmpdir."""
+        env = os.environ.copy()
+        env["OPENCODE_CONFIG_DIR"] = tmpdir
+        proc = subprocess.run(
+            [sys.executable, DOCTOR_SCRIPT, "validate", "--mode", mode],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_agent_registry_detects_stale_runtime_in_agent_dir(self):
+        """validate should FAIL when runtime/ exists inside agent directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_dir = Path(tmpdir) / "agents"
+            runtime_dir = agent_dir / "runtime" / "prompts"
+            runtime_dir.mkdir(parents=True)
+            (agent_dir / "heidi.md").write_text("public agent")
+            (agent_dir / "runtime" / "heidi-orchestration.md").write_text("internal")
+            (agent_dir / "runtime" / "prompts" / "core.md").write_text("internal fragment")
+
+            rc, out, err = self._run_validate_isolated(tmpdir)
+            self.assertIn("runtime/heidi-orchestration.md: FAIL", out,
+                          "Doctor should detect stale runtime prompt in agent dir")
+
+    def test_agent_registry_public_agents_allowed(self):
+        """validate should PASS when only flat .md files are in agent dir."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_dir = Path(tmpdir) / "agents"
+            agent_dir.mkdir(parents=True)
+            for a in ("heidi", "frontend", "backend"):
+                (agent_dir / f"{a}.md").write_text(f"public agent {a}")
+
+            rc, out, err = self._run_validate_isolated(tmpdir)
+            fail_lines = [l for l in out.split('\n') if 'FAIL' in l and 'Agent registry' in l]
+            self.assertEqual(len(fail_lines), 0,
+                             f"Should have no agent-registry FAILs: {fail_lines}")
+
+    def test_agent_registry_exits_nonzero_with_stale_runtime(self):
+        """validate should exit non-zero when stale runtime files in agent dir."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_dir = Path(tmpdir) / "agents"
+            runtime_dir = agent_dir / "runtime"
+            runtime_dir.mkdir(parents=True)
+            (agent_dir / "heidi.md").write_text("public")
+            (runtime_dir / "internal.md").write_text("internal")
+
+            rc, out, err = self._run_validate_isolated(tmpdir)
+            self.assertNotEqual(rc, 0,
+                                "Doctor should exit non-zero with stale runtime files")
 
 
 if __name__ == "__main__":

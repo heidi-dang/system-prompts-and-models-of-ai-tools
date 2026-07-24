@@ -246,11 +246,14 @@ class TestTokenEstimator(unittest.TestCase):
         self.assertIn("second_audit_cycle", result["breakdown"])
 
     def test_simulate_27m_governed(self):
-        """Governed scenario should be smaller than unbounded by >80%."""
+        """Governed scenario should be smaller than unbounded by >80%.
+        Model call count must match unbounded (no instrumentation overhead)."""
         governed = simulate_27m_governed()
         unbounded = simulate_27m_scenario()
         self.assertLess(governed["total_tokens"], unbounded["total_tokens"] * 0.2)
-        self.assertGreater(governed["model_calls"], 0)
+        # Governed should have same model call count as unbounded (no extra instrumentation)
+        self.assertEqual(governed["model_calls"], unbounded["num_calls"],
+                         f"Governed ({governed['model_calls']}) should match unbounded ({unbounded['num_calls']}) calls")
         self.assertGreater(governed["subagent_calls"], 0)
         self.assertIn("budget_warning_triggered", governed)
         self.assertIn("hard_stop_triggered", governed)

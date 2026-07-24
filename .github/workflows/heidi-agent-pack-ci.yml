@@ -19,7 +19,15 @@ on:
       - ".github/workflows/heidi-agent-pack-ci.yml"
   workflow_dispatch:
 
+env:
+  MOCK_OPENCODE_DIR: ${{ github.workspace }}/tests/fixtures
+  OPENCODE_CONFIG_DIR: ${{ github.workspace }}/tests/fixtures/opencode_config
+
 jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Required offline CI — runs on every push/PR, no external deps
+  # ──────────────────────────────────────────────────────────────────
+
   static:
     name: Static analysis
     runs-on: ubuntu-latest
@@ -66,7 +74,7 @@ jobs:
       - name: Token governance tests
         run: python3 -m unittest tests.test_token_governance -v
       - name: Runtime doctor tests
-        run: python3 -m unittest tests.test_runtime_doctor -v 2>/dev/null || python3 opencode-agent-pack/scripts/runtime_doctor.py validate
+        run: python3 -m unittest tests.test_runtime_doctor -v
 
   installer:
     name: Installer tests
@@ -75,53 +83,30 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Python YAML
         run: sudo apt-get update -qq && sudo apt-get install -y -qq python3-yaml
+      - name: Add mock OpenCode to PATH
+        run: echo "${{ github.workspace }}/tests/fixtures" >> "$GITHUB_PATH"
       - name: Run installer test suite
         run: bash tests/test_installer.sh
       - name: Validate agent definitions
         run: python3 tests/validate_agents.py
       - name: Initialize .heidi directory
         run: bash agent.sh --init-context
-      - name: Test runtime doctor
-        run: bash agent.sh --runtime-doctor
+      - name: Runtime doctor validation
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py validate --mode isolated
+      - name: Native prompt probe (offline)
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt --mode isolated
       - name: Test benchmark smoke
         run: bash agent.sh --benchmark-smoke
 
-  runtime:
-    name: Runtime discovery (OpenCode)
+  runtime-doctor-negative:
+    name: Runtime doctor negative tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install OpenCode
-        run: |
-          curl -fsSL https://opencode.ai/install | bash || true
-          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
-      - name: Verify OpenCode installed
-        id: check_opencode
-        run: |
-          if command -v opencode &>/dev/null || [ -f "$HOME/.opencode/bin/opencode" ]; then
-            echo "installed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "installed=false" >> "$GITHUB_OUTPUT"
-            echo "OpenCode installation failed (URL may have moved)"
-          fi
-      - name: Install agents globally
-        if: steps.check_opencode.outputs.installed == 'true'
-        continue-on-error: true
-        run: |
-          export OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
-          bash agent.sh --install --global
-      - name: Verify agent discovery
-        if: steps.check_opencode.outputs.installed == 'true'
-        run: |
-          opencode agent list 2>&1 || true
-          opencode debug config 2>&1 | head -40 || true
-      - name: Run runtime doctor
-        if: steps.check_opencode.outputs.installed == 'true'
-        run: bash agent.sh --runtime-doctor
-      - name: Native prompt composition probe
-        if: steps.check_opencode.outputs.installed == 'true'
-        run: |
-          python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt || echo "native-prompt: unavailable (expected in CI)"
+      - name: Test broken token policy
+        run: python3 tests/fixtures/test_broken_policy.py
+      - name: Test missing .heidi directory
+        run: python3 tests/fixtures/test_missing_heidi.py
 
   benchmark-smoke:
     name: Benchmark smoke (deterministic)
@@ -135,33 +120,69 @@ jobs:
       - name: Verify benchmark tasks
         run: python3 -m unittest tests.test_benchmark -v
 
-  optional-real-model:
-    name: Real-model benchmark (manual)
+  # ──────────────────────────────────────────────────────────────────
+  # Optional live integration — manual trigger only
+  # ──────────────────────────────────────────────────────────────────
+
+  live-integration:
+    name: Live integration (OpenCode)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install OpenCode
         run: |
-          curl -fsSL https://opencode.ai/install | bash || true
+          curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
-      - name: Run real-model benchmarks
+      - name: Verify OpenCode installed
+        id: check_opencode
+        run: |
+          if command -v opencode &>/dev/null || [ -f "$HOME/.opencode/bin/opencode" ]; then
+            echo "installed=true" >> "$GITHUB_OUTPUT"
+            echo "OpenCode available"
+          else
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "OpenCode installation failed (URL may have moved)"
+          fi
+      - name: Install agents globally
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: |
+          export OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
+          bash agent.sh --install --global
+      - name: Verify agent discovery
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: |
+          opencode agent list 2>&1
+          opencode debug config 2>&1 | head -40
+      - name: Runtime doctor (installed mode)
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt --mode installed
+      - name: Native prompt composition probe
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt --mode installed
+      - name: Real-model benchmarks
+        if: steps.check_opencode.outputs.installed == 'true'
         run: |
           python3 opencode-agent-pack/scripts/benchmark.py run \
             --agent build \
             --agent heidi \
             --model current \
             --suite smoke \
-            --results benchmarks/results || echo "Real-model benchmarks skipped (no model configured)"
+            --results benchmarks/results
       - name: Compare results
+        if: steps.check_opencode.outputs.installed == 'true'
         run: |
           python3 opencode-agent-pack/scripts/benchmark.py compare \
             --baseline build \
             --candidate heidi \
-            --results benchmarks/results || echo "Comparison skipped"
+            --results benchmarks/results
       - name: Upload benchmark results
+        if: steps.check_opencode.outputs.installed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
           path: benchmarks/results/
           retention-days: 30
+      - name: Report skipped
+        if: steps.check_opencode.outputs.installed != 'true'
+        run: echo "Live integration skipped — OpenCode not available"

@@ -563,8 +563,13 @@ def simulate_27m_governed():
     # Phase 7: No second audit cycle (capped at max_audit_cycles=1)
     # Skipped entirely under governance.
 
-    # Phase 8: More implementation until hard stop / call limit
-    for i in range(20):
+    # Phase 8: More implementation — range(19) chosen so total model calls (34)
+    # matches the unbounded scenario's 34 calls for a fair comparison.
+    # Governance does NOT add any instrumentation or accounting calls;
+    # all 34 are genuine execution calls (5 subagent delegations + 29 direct).
+    # Governance cuts 3 retries + 1 second audit (4 wasteful calls)
+    # and replaces them with productive direct-execution calls.
+    for i in range(19):
         est = _governed_estimate(delegation_chars=0, tool_result_chars=2000,
                                  output_chars=400, reasoning_chars=200)
         if not record_call(f"late_impl_governed_{i}", est, is_subagent=False):

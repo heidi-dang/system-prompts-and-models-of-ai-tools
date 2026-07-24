@@ -1,0 +1,16 @@
+{
+  "version": "0.1.0-mock",
+  "model": "gpt-4o-mock",
+  "prompt": "You are a helpful mock OpenCode assistant.",
+  "agent": {
+    "heidi": {
+      "prompt": "Heidi orchestrator agent prompt (mock)"
+    },
+    "build": {
+      "prompt": "Build agent prompt (mock)"
+    },
+    "plan": {
+      "prompt": "Plan agent prompt (mock)"
+    }
+  }
+}

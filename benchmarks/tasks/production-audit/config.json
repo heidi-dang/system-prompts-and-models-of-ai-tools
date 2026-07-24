@@ -1,0 +1,19 @@
+{
+  "task_id": "production-audit-001",
+  "task_name": "Production Readiness Audit",
+  "task_category": "production-audit",
+  "description": "Audit the repository for production readiness",
+  "request": "Perform a production readiness audit of this codebase. Check for security issues, missing error handling, and deployment concerns.",
+  "expected": {
+    "max_files_changed": 0,
+    "completion_required": true
+  },
+  "forbidden": {
+    "no_new_files": true,
+    "no_config_changes": true
+  },
+  "timeout_seconds": 600,
+  "complexity": "large",
+  "risk": "low",
+  "fast_path_applicable": false
+}

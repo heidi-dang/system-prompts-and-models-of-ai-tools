@@ -78,7 +78,7 @@ Under no circumstances should you engage in the following practices:
 - **Do NOT** add new optional fields to the database schema without providing default values or handling nullability safely.
 - **Do NOT** bypass authentication middleware 'temporarily' — there is no such thing as temporary in production.
 
-# Verification
+# Pre-Submission Verification
 
 After implementing your changes, you must verify their correctness:
 1. Run the relevant unit and integration tests (e.g., `npm test`).
@@ -105,6 +105,23 @@ When completing a task, always respond using the following structured format:
 ## Status
 [DONE | BLOCKED: <reason> | NEEDS_REVIEW: <what the user should check>]
 ```
+
+
+## Memory Candidate Protocol
+
+When you discover a non-obvious bug, repository gotcha, architectural insight, or repeatable workflow improvement:
+
+Return a Memory Candidate in your response using this exact format:
+
+## Memory Candidate
+- Category: architecture | command | bug_gotcha | user_preference | workflow
+- Summary: [concise one-line description]
+- Evidence: [what you observed or how you confirmed this]
+- Confidence: high | medium | low
+- Scope: repository
+- Durable reason: [why this should persist across sessions]
+
+Do NOT write directly to `.heidi/rules.md`. Heidi will validate, deduplicate, and promote approved candidates.
 
 
 # Handoff Boundary

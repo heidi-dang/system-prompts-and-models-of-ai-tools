@@ -131,3 +131,36 @@ python3 tests/validate_agents.py          # agent definitions
 python3 -m unittest tests.test_memory -v  # memory utility
 bash tests/test_installer.sh              # installer suite
 ```
+
+## Legendary Heidi Runtime (v1.4.0)
+
+Legendary Heidi preserves OpenCode's native model-specific intelligence and adds
+a modular orchestration layer on top. See `docs/legendary-heidi/` for full documentation.
+
+### Key Capabilities
+- **Native Intelligence Bridge**: Composes with provider-specific prompts instead of replacing them
+- **Automatic Runtime Lifecycle**: Context retrieval, strategy selection, task ledger, runtime events
+- **Fast Path**: Low-overhead execution for simple tasks (typo fixes, config changes)
+- **Verified Memory**: Memory Candidates replace direct rules.md mutation
+- **Prompt Proposals**: Validated, evaluated, and approved prompt evolution
+- **Resilience**: Failure classifier, circuit breaker, bounded retries
+- **Build-vs-Heidi Benchmarks**: Deterministic grading with same-model comparisons
+- **Full Lifecycle**: Install, doctor, migrate, benchmark, uninstall, rollback
+
+### Runtime Doctor
+```bash
+./agent.sh --runtime-doctor
+```
+Checks native prompt composition, plugin status, and agent discovery.
+
+### Benchmark Smoke
+```bash
+./agent.sh --benchmark-smoke
+```
+Runs deterministic benchmark validation.
+
+### Full Validation
+```bash
+./agent.sh --validate-all
+```
+Runs all pack validation including agents, memory, context, strategies, proposals, runtime, and benchmarks.

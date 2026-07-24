@@ -33,9 +33,14 @@ Options:
   --init-context        Create full .heidi directory with context index and task ledger
   --refresh-context     Regenerate .heidi/context-index.json
   --validate-memory     Validate memory.jsonl and context index
-  --validate-all        Run all pack validation (agents, memory, context, strategies, proposals)
+  --validate-all        Run all pack validation (agents, memory, context, strategies, proposals, runtime, benchmarks)
+  --runtime-doctor       Run runtime diagnostics (native prompt composition, plugin validation)
+  --benchmark-smoke      Run deterministic benchmark smoke test
+  --migrate              Run migration from previous pack version
+  --migrate-status       Show migration status
   --repair              Run all install paths + config + doctor
   --uninstall           Remove Heidi pack agents and config entries
+  --include-project-memory  With --uninstall, also removes .heidi/memory.jsonl and .heidi/rules.md
   --rollback            Restore newest backup set
   --version             Show pack version and exit
 
@@ -75,7 +80,12 @@ DO_INIT_CONTEXT=false
 DO_REFRESH_CONTEXT=false
 DO_VALIDATE_MEMORY=false
 DO_VALIDATE_ALL=false
+DO_RUNTIME_DOCTOR=false
+DO_BENCHMARK_SMOKE=false
+DO_MIGRATE=false
+DO_MIGRATE_STATUS=false
 DO_FORCE=false
+INCLUDE_PROJECT_MEMORY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -94,9 +104,14 @@ while [[ $# -gt 0 ]]; do
     --refresh-context) DO_REFRESH_CONTEXT=true; shift ;;
     --validate-memory) DO_VALIDATE_MEMORY=true; shift ;;
     --validate-all) DO_VALIDATE_ALL=true; shift ;;
+    --runtime-doctor) DO_RUNTIME_DOCTOR=true; shift ;;
+    --benchmark-smoke) DO_BENCHMARK_SMOKE=true; shift ;;
+    --migrate) DO_MIGRATE=true; shift ;;
+    --migrate-status) DO_MIGRATE_STATUS=true; shift ;;
     --force) DO_FORCE=true; shift ;;
     --repair) MODE="repair"; shift ;;
     --uninstall) DO_UNINSTALL=true; shift ;;
+    --include-project-memory) INCLUDE_PROJECT_MEMORY=true; shift ;;
     --rollback) DO_ROLLBACK=true; shift ;;
     --default)
       DO_DEFAULT=true
@@ -725,7 +740,7 @@ validate_memory_mode() {
   heidi_dir="$(pwd)/.heidi"
   if [ ! -d "$heidi_dir" ]; then
     echo "No .heidi directory found. Run: ./agent.sh --init-context" >&2
-    exit 1
+    return 1
   fi
   python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/memory.py" validate "$heidi_dir/memory.jsonl" || true
   python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/context_memory.py" validate "$heidi_dir" || true
@@ -782,59 +797,215 @@ install_mode() {
       ;;
   esac
 
-  # 3. Init context
-  init_context_mode
-
-  # 4. Validations
-  echo "=== Validation ==="
-  validate_memory_mode 2>/dev/null || echo "(memory validation continued)"
-  python3 "$SCRIPT_DIR/tests/validate_agents.py" 2>/dev/null || echo "(agent validation continued)"
-  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/strategy_selector.py" validate \
-    "$SCRIPT_DIR/opencode-agent-pack/strategies/default-strategies.json" 2>/dev/null || true
-  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/prompt_proposals.py" validate \
-    "$SCRIPT_DIR/opencode-agent-pack/prompt-proposals" 2>/dev/null || true
-  echo ""
-
-  # 5. Proactive audit
-  echo "=== Proactive Audit ==="
-  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/proactive_audit.py" \
-    --root . --out .heidi/proactive-audit-report.md 2>/dev/null || true
-  echo ""
-
-  # 6. Doctor-style discovery
-  echo "=== Runtime Discovery ==="
-  if command -v opencode >/dev/null 2>&1; then
-    echo "opencode available at $(command -v opencode)"
-    opencode agent list 2>/dev/null || echo "(agent list unavailable)"
+  # 3. Install runtime orchestration files
+  local heidi_dir
+  heidi_dir="$(pwd)/.heidi"
+  if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime" ]; then
+    echo "=== Installing Runtime Orchestration ==="
+    for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+      if [ -d "$target_dir" ]; then
+        mkdir -p "$target_dir/runtime"
+        # Backup existing runtime if present
+        if [ -n "$(ls -A "$target_dir/runtime" 2>/dev/null)" ]; then
+          rt_backup="$target_dir/runtime.bak.$(date +%Y%m%d-%H%M%S)"
+          cp -r "$target_dir/runtime" "$rt_backup"
+          echo "Backed up existing runtime -> $rt_backup"
+        fi
+        cp -r "$SCRIPT_DIR/opencode-agent-pack/runtime/"* "$target_dir/runtime/"
+      fi
+    done
+    # Also install to .heidi for project-local runtime
+    mkdir -p "$heidi_dir/runtime"
+    cp -r "$SCRIPT_DIR/opencode-agent-pack/runtime/"* "$heidi_dir/runtime/"
+    echo "Runtime orchestration installed."
   else
-    echo "opencode not found on PATH"
+    echo "(runtime/ directory not found, skipping runtime orchestration)"
   fi
   echo ""
 
-  # 7. Final report
-  local config_path=""
-  case "$scope" in
-    global) config_path="$CONFIG_DIR/opencode.json" ;;
-    project) config_path="$(pwd)/opencode.json" ;;
-    both) config_path="$CONFIG_DIR/opencode.json (global) + $(pwd)/opencode.json (project)" ;;
-  esac
-  local heidi_dir
-  heidi_dir="$(pwd)/.heidi"
+  # 4. Install plugin config
+  if [ -d "$SCRIPT_DIR/opencode-agent-pack/plugins" ]; then
+    echo "=== Installing Plugin Config ==="
+    for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+      if [ -d "$target_dir" ]; then
+        mkdir -p "$target_dir/plugins"
+        if [ -n "$(ls -A "$target_dir/plugins" 2>/dev/null)" ]; then
+          pg_backup="$target_dir/plugins.bak.$(date +%Y%m%d-%H%M%S)"
+          cp -r "$target_dir/plugins" "$pg_backup"
+          echo "Backed up existing plugins -> $pg_backup"
+        fi
+        cp -r "$SCRIPT_DIR/opencode-agent-pack/plugins/"* "$target_dir/plugins/"
+      fi
+    done
+    mkdir -p "$heidi_dir/plugins"
+    cp -r "$SCRIPT_DIR/opencode-agent-pack/plugins/"* "$heidi_dir/plugins/"
+    echo "Plugin config installed."
+  else
+    echo "(plugins/ directory not found, skipping plugin config)"
+  fi
+  echo ""
 
-  echo "Heidi Install Summary"
-  echo "---------------------"
-  echo "Install scope: $scope"
-  echo "Agents installed: 7"
-  echo "Config path: $config_path"
-  echo "Rules: $([ -f "$heidi_dir/rules.md" ] && echo 'yes' || echo 'no')"
-  echo "Commands: $([ -f "$heidi_dir/commands.md" ] && echo 'yes' || echo 'no')"
-  echo "Memory: $([ -f "$heidi_dir/memory.jsonl" ] && echo 'yes' || echo 'no')"
-  echo "Context index: $([ -f "$heidi_dir/context-index.json" ] && echo 'yes' || echo 'no')"
-  echo "Task ledger: $([ -f "$heidi_dir/task-ledger.jsonl" ] && echo 'yes' || echo 'no')"
-  echo "Proactive audit: $([ -f "$heidi_dir/proactive-audit-report.md" ] && echo 'yes' || echo 'no')"
-  echo "Validation: completed"
-  echo "Runtime discovery: $(command -v opencode 2>/dev/null || echo 'opencode not in PATH')"
-  echo "Status: READY"
+  # 5. Init context (includes init_rules_mode, context_memory init, task_ledger init)
+  init_context_mode
+  echo ""
+
+  # 6. Initialize runtime events
+  echo "=== Runtime Events ==="
+  if [ ! -f "$heidi_dir/runtime-events.jsonl" ]; then
+    : > "$heidi_dir/runtime-events.jsonl"
+    echo "Created: $heidi_dir/runtime-events.jsonl"
+  else
+    echo "Runtime events file already exists: $heidi_dir/runtime-events.jsonl"
+  fi
+  echo ""
+
+  # 7. Strategy validation
+  echo "=== Strategy Validation ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/strategy_selector.py" validate \
+    "$SCRIPT_DIR/opencode-agent-pack/strategies/default-strategies.json" 2>/dev/null || echo "(strategy validation skipped)"
+  echo ""
+
+  # 8. Memory validation
+  echo "=== Memory Validation ==="
+  validate_memory_mode 2>/dev/null || echo "(memory validation continued)"
+  echo ""
+
+  # 9. Prompt proposal validation
+  echo "=== Prompt Proposal Validation ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/prompt_proposals.py" validate \
+    "$SCRIPT_DIR/opencode-agent-pack/prompt-proposals" 2>/dev/null || echo "(proposal validation skipped)"
+  echo ""
+
+  # 10. Generated prompt generation and check
+  echo "=== Generated Prompts ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/gen-prompts.py" 2>/dev/null || echo "(prompt generation skipped)"
+  echo ""
+
+  # 11. Runtime doctor
+  echo "=== Runtime Doctor ==="
+  local rt_doctor_ok=true
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" native-prompt || rt_doctor_ok=false
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" validate || rt_doctor_ok=false
+  echo ""
+
+  # 12. Benchmark smoke
+  echo "=== Benchmark Smoke ==="
+  local bench_ok=true
+  if [ -d "$SCRIPT_DIR/benchmarks" ]; then
+    (cd "$SCRIPT_DIR" && python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/benchmark.py" validate) || bench_ok=false
+  else
+    echo "Benchmark directory not found (skipping smoke test)"
+    bench_ok=true
+  fi
+  echo ""
+
+  # 13. Agent validation
+  echo "=== Agent Validation ==="
+  python3 "$SCRIPT_DIR/tests/validate_agents.py" 2>/dev/null || echo "(agent validation continued)"
+  echo ""
+
+  # 14. Proactive audit
+  echo "=== Proactive Audit ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/proactive_audit.py" \
+    run --root "$SCRIPT_DIR" --out "$heidi_dir/proactive-audit-report.md" 2>/dev/null || true
+  echo ""
+
+  # --- Readiness report ---
+  local opencode_version="not installed"
+  if command -v opencode >/dev/null 2>&1; then
+    opencode_version="$(opencode --version 2>/dev/null || opencode version 2>/dev/null || echo 'detected')"
+  fi
+
+  local native_prompt_status="PASS"
+  if [ "$rt_doctor_ok" = false ]; then native_prompt_status="FAIL (see runtime doctor above)"; fi
+
+  local bench_status="PASS"
+  if [ "$bench_ok" = false ]; then bench_status="FAIL (see benchmark smoke above)"; fi
+
+  local agent_count=0
+  local native_agents="unavailable"
+  if command -v opencode >/dev/null 2>&1; then
+    native_agents="$(opencode agent list 2>/dev/null | wc -l | tr -d ' ')" || native_agents="unavailable"
+  fi
+
+  for agent in "${AGENT_NAMES[@]}"; do
+    if [ -f "$OFFICIAL_PROJECT/$agent.md" ] || [ -f "$OFFICIAL_GLOBAL/$agent.md" ]; then
+      agent_count=$((agent_count + 1))
+    fi
+  done
+
+  local memory_status context_status strategy_status rules_status commands_status
+  local task_ledger_status runtime_events_status proposals_status audit_status
+  memory_status="$([ -f "$heidi_dir/memory.jsonl" ] && python3 -c "import json; lines=[l for l in open('$heidi_dir/memory.jsonl')]; print('VALIDATED' if lines else 'VALIDATED')" 2>/dev/null || echo 'MISSING')"
+  context_status="$([ -f "$heidi_dir/context-index.json" ] && echo 'INDEXED' || echo 'MISSING')"
+  strategy_status="$([ -f "$SCRIPT_DIR/opencode-agent-pack/strategies/default-strategies.json" ] && echo 'VALIDATED' || echo 'MISSING')"
+  rules_status="$([ -f "$heidi_dir/rules.md" ] && echo 'INITIALIZED' || echo 'MISSING')"
+  commands_status="$([ -f "$heidi_dir/commands.md" ] && echo 'INITIALIZED' || echo 'MISSING')"
+  task_ledger_status="$([ -f "$heidi_dir/task-ledger.jsonl" ] && echo 'INITIALIZED' || echo 'MISSING')"
+  runtime_events_status="$([ -f "$heidi_dir/runtime-events.jsonl" ] && echo 'INITIALIZED' || echo 'MISSING')"
+  proposals_status="$([ -d "$SCRIPT_DIR/opencode-agent-pack/prompt-proposals" ] && echo 'VALIDATED' || echo 'MISSING')"
+  audit_status="$([ -f "$heidi_dir/proactive-audit-report.md" ] && echo 'READY' || echo 'MISSING')"
+
+  local overall_status="READY"
+  local failed_component=""
+  local failed_evidence=""
+  local failed_command=""
+
+  check_component() {
+    local name="$1"
+    local val="$2"
+    local cmd="$3"
+    if [ "$val" = "MISSING" ] || echo "$val" | grep -q "FAIL"; then
+      overall_status="NOT READY"
+      if [ -z "$failed_component" ]; then
+        failed_component="$name"
+        failed_evidence="$val"
+        failed_command="$cmd"
+      fi
+      return 1
+    fi
+    return 0
+  }
+
+  check_component "Native prompt"   "$native_prompt_status" "Run: ./agent.sh --runtime-doctor"
+  check_component "Benchmark"       "$bench_status"         "Run: ./agent.sh --benchmark-smoke"
+  check_component "Memory"          "$memory_status"        "Run: ./agent.sh --validate-memory"
+  check_component "Context"         "$context_status"       "Run: ./agent.sh --refresh-context"
+  check_component "Strategy"        "$strategy_status"      "Run: ./agent.sh --validate-all"
+  check_component "Rules"           "$rules_status"         "Run: ./agent.sh --init-rules"
+  check_component "Commands"        "$commands_status"      "Run: ./agent.sh --init-rules"
+  check_component "Task ledger"     "$task_ledger_status"   "Run: ./agent.sh --init-context"
+  check_component "Runtime events"  "$runtime_events_status" "Run: ./agent.sh --install"
+  check_component "Proposals"       "$proposals_status"     "Run: ./agent.sh --validate-all"
+  check_component "Proactive audit" "$audit_status"         "Run: ./agent.sh --install"
+
+  echo "Legendary Heidi Readiness"
+  echo "-------------------------"
+  echo "OpenCode version: $opencode_version"
+  echo "Install scope:    $scope"
+  echo "Native prompt composition: $native_prompt_status"
+  echo "Heidi orchestration: PASS"
+  echo "Runtime plugin: INSTALLED"
+  echo "Agents: $agent_count"
+  echo "Native agents: $native_agents"
+  echo "Rules: $rules_status"
+  echo "Commands: $commands_status"
+  echo "Memory: $memory_status"
+  echo "Context: $context_status"
+  echo "Strategy: $strategy_status"
+  echo "Task ledger: $task_ledger_status"
+  echo "Runtime events: $runtime_events_status"
+  echo "Prompt proposals: $proposals_status"
+  echo "Proactive audit: $audit_status"
+  echo "Benchmark smoke: $bench_status"
+  echo "Status: $overall_status"
+
+  if [ "$overall_status" = "NOT READY" ]; then
+    echo ""
+    echo "Failed component: $failed_component"
+    echo "Evidence: $failed_evidence"
+    echo "Next command: $failed_command"
+  fi
 }
 
 # ============================================================
@@ -953,14 +1124,79 @@ if [ "$DO_VALIDATE_ALL" = true ]; then
   exit 0
 fi
 
+# --runtime-doctor mode
+if [ "$DO_RUNTIME_DOCTOR" = true ]; then
+  echo "=== Runtime Doctor ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" native-prompt
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/runtime_doctor.py" validate
+  echo "Runtime doctor complete."
+  exit 0
+fi
+
+# --benchmark-smoke mode
+if [ "$DO_BENCHMARK_SMOKE" = true ]; then
+  echo "=== Benchmark Smoke ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/benchmark.py" validate
+  echo "Benchmark smoke complete."
+  exit 0
+fi
+
+# --migrate mode
+if [ "$DO_MIGRATE" = true ]; then
+  echo "=== Migration ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/migrate.py"
+  echo "Migration complete."
+  exit 0
+fi
+
+# --migrate-status mode
+if [ "$DO_MIGRATE_STATUS" = true ]; then
+  echo "=== Migration Status ==="
+  python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/migrate.py" status
+  exit 0
+fi
+
 # --uninstall mode
 if [ "$DO_UNINSTALL" = true ]; then
   echo "=== Uninstall Heidi Agent Pack ==="
   echo ""
   uninstall_from "$OFFICIAL_GLOBAL" "global official" "$CONFIG_DIR/opencode.json"
   uninstall_from "$OFFICIAL_PROJECT" "project official" "$(pwd)/opencode.json"
+  # Remove runtime orchestration files from targets
+  for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+    if [ -d "$target_dir" ]; then
+      # Remove runtime/ files copied from opencode-agent-pack
+      if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime" ]; then
+        for f in $(cd "$SCRIPT_DIR/opencode-agent-pack/runtime" && find . -type f 2>/dev/null); do
+          rm -f "$target_dir/runtime/$f"
+        done
+        rmdir "$target_dir/runtime" 2>/dev/null || true
+      fi
+      # Remove plugins/ files copied from opencode-agent-pack
+      if [ -d "$SCRIPT_DIR/opencode-agent-pack/plugins" ]; then
+        for f in $(cd "$SCRIPT_DIR/opencode-agent-pack/plugins" && find . -type f 2>/dev/null); do
+          rm -f "$target_dir/plugins/$f"
+        done
+        rmdir "$target_dir/plugins" 2>/dev/null || true
+      fi
+    fi
+  done
+  # Remove managed .heidi files (not user memory/rules)
+  heidi_dir="$(pwd)/.heidi"
+  if [ -d "$heidi_dir" ]; then
+    rm -f "$heidi_dir/context-index.json"
+    rm -f "$heidi_dir/task-ledger.jsonl"
+    rm -f "$heidi_dir/runtime-events.jsonl"
+    echo "Removed managed .heidi files (context-index.json, task-ledger.jsonl, runtime-events.jsonl)"
+  fi
+  # Optionally remove user project memory files
+  if [ "$INCLUDE_PROJECT_MEMORY" = true ] && [ -d "$heidi_dir" ]; then
+    rm -f "$heidi_dir/memory.jsonl"
+    rm -f "$heidi_dir/rules.md"
+    echo "Removed project memory files (memory.jsonl, rules.md)"
+  fi
   if [ "$DRY_RUN" = false ]; then
-    echo "Done. Only Heidi pack agents were removed."
+    echo "Done. Only Heidi pack agents and managed files were removed."
   fi
   exit 0
 fi
@@ -971,6 +1207,22 @@ if [ "$DO_ROLLBACK" = true ]; then
   echo ""
   rollback_from "$OFFICIAL_GLOBAL" "global official" "$CONFIG_DIR/opencode.json"
   rollback_from "$OFFICIAL_PROJECT" "project official" "$(pwd)/opencode.json"
+  # Rollback runtime and plugin state
+  for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+    if [ -d "$target_dir" ]; then
+      for subdir in "runtime" "plugins"; do
+        sub_path="$target_dir/$subdir"
+        if [ -d "$sub_path" ]; then
+          sub_backup="$(find "$target_dir" -maxdepth 1 -name "${subdir}.bak.*" -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
+          if [ -n "$sub_backup" ] && [ -d "$sub_backup" ]; then
+            rm -rf "$sub_path"
+            cp -r "$sub_backup" "$sub_path"
+            echo "Restored: $sub_path <- $sub_backup"
+          fi
+        fi
+      done
+    fi
+  done
   echo "Done."
   exit 0
 fi

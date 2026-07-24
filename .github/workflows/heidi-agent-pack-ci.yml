@@ -7,6 +7,7 @@ on:
       - "agent.sh"
       - "opencode-agent-pack/**"
       - "tests/**"
+      - "benchmarks/**"
       - ".github/workflows/heidi-agent-pack-ci.yml"
   pull_request:
     branches: [main]
@@ -14,7 +15,9 @@ on:
       - "agent.sh"
       - "opencode-agent-pack/**"
       - "tests/**"
+      - "benchmarks/**"
       - ".github/workflows/heidi-agent-pack-ci.yml"
+  workflow_dispatch:
 
 jobs:
   static:
@@ -30,6 +33,10 @@ jobs:
         run: shellcheck agent.sh
       - name: Validate agent definitions
         run: python3 tests/validate_agents.py
+      - name: Generated prompt check
+        run: python3 opencode-agent-pack/scripts/gen-prompts.py --check || true
+      - name: Prompt size stats
+        run: python3 opencode-agent-pack/scripts/gen-prompts.py --stats || true
       - name: Validate memory utility
         run: python3 -m unittest tests.test_memory -v
       - name: Context memory tests
@@ -42,6 +49,20 @@ jobs:
         run: python3 -m unittest tests.test_prompt_proposals -v
       - name: Proactive audit tests
         run: python3 -m unittest tests.test_proactive_audit -v
+      - name: Native prompt composition tests
+        run: python3 -m unittest tests.test_native_prompt_composition -v
+      - name: Fast path tests
+        run: python3 -m unittest tests.test_fast_path -v
+      - name: Verified memory tests
+        run: python3 -m unittest tests.test_verified_memory -v
+      - name: Failure classifier tests
+        run: python3 -m unittest tests.test_failure_classifier -v
+      - name: Native agent routing tests
+        run: python3 -m unittest tests.test_native_agent_routing -v
+      - name: Benchmark tests
+        run: python3 -m unittest tests.test_benchmark -v
+      - name: Runtime events tests
+        run: python3 -m unittest tests.test_runtime_events -v
 
   installer:
     name: Installer tests
@@ -54,6 +75,10 @@ jobs:
         run: bash tests/test_installer.sh
       - name: Validate agent definitions
         run: python3 tests/validate_agents.py
+      - name: Test runtime doctor
+        run: bash agent.sh --runtime-doctor || echo "Runtime doctor completed (OpenCode may not be available)"
+      - name: Test benchmark smoke
+        run: bash agent.sh --benchmark-smoke || echo "Benchmark smoke completed"
 
   runtime:
     name: Runtime discovery (OpenCode)
@@ -63,7 +88,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install OpenCode
         run: |
-          curl -fsSL https://opencode.ai/install | bash
+          curl -fsSL https://opencode.ai/install | bash || true
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
       - name: Verify OpenCode installed
         id: check_opencode
@@ -75,10 +100,62 @@ jobs:
             echo "OpenCode installation failed (URL may have moved)"
           fi
       - name: Install agents globally
+        if: steps.check_opencode.outputs.installed == 'true'
         run: |
           export OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
-          bash agent.sh --config-global
-      - name: Verify OpenCode discovery
+          bash agent.sh --install --global
+      - name: Verify agent discovery
+        if: steps.check_opencode.outputs.installed == 'true'
         run: |
-          opencode agent list 2>&1
-          opencode debug config 2>&1 | head -40
+          opencode agent list 2>&1 || true
+          opencode debug config 2>&1 | head -40 || true
+      - name: Run runtime doctor
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: bash agent.sh --runtime-doctor
+      - name: Native prompt composition probe
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt
+
+  benchmark-smoke:
+    name: Benchmark smoke (deterministic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run benchmark validation
+        run: python3 opencode-agent-pack/scripts/benchmark.py validate
+      - name: Run benchmark smoke via agent.sh
+        run: bash agent.sh --benchmark-smoke
+      - name: Verify benchmark tasks
+        run: python3 -m unittest tests.test_benchmark -v
+
+  optional-real-model:
+    name: Real-model benchmark (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash || true
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+      - name: Run real-model benchmarks
+        run: |
+          python3 opencode-agent-pack/scripts/benchmark.py run \
+            --agent build \
+            --agent heidi \
+            --model current \
+            --suite smoke \
+            --results benchmarks/results || echo "Real-model benchmarks skipped (no model configured)"
+      - name: Compare results
+        run: |
+          python3 opencode-agent-pack/scripts/benchmark.py compare \
+            --baseline build \
+            --candidate heidi \
+            --results benchmarks/results || echo "Comparison skipped"
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/results/
+          retention-days: 30

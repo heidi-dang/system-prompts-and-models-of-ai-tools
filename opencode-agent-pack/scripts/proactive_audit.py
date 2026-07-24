@@ -4,12 +4,16 @@ Proactive Audit Mode — identify issues and suggest fixes without auto-modifica
 
 Commands:
   run --root <r> [--context <f>] [--out <f>]  Run proactive audit
+  should-run --root <r> [--interval <s>]      Check if audit should run
+  diff --root <r> --baseline <commit> [--current <commit>]  Diff audit findings
 """
 
 import argparse
 import json
 import os
+import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -156,13 +160,227 @@ def get_recommendation(check_id):
     return recs.get(check_id, "Manual review recommended")
 
 
+# ──────────────────────────────────────────────────────────────────
+# should-run command
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_should_run(args):
+    """Check whether proactive audit should run based on triggers:
+      - Agent files changed
+      - Runtime/plugin files changed
+      - Permissions changed
+      - Installer changed
+      - Context schema changed
+      - Interval elapsed
+      - Repeated ledger failures
+    """
+    root = Path(args.root)
+    interval = int(args.interval) if args.interval else 86400  # default 24h
+
+    triggers = []
+    should = False
+
+    # Check last audit run time
+    last_audit_path = root / ".heidi" / "last-audit.txt"
+    if last_audit_path.exists():
+        try:
+            last_ts = float(last_audit_path.read_text().strip())
+            if time.time() - last_ts > interval:
+                triggers.append(f"interval elapsed ({interval}s)")
+                should = True
+        except Exception:
+            triggers.append("no valid last-audit timestamp")
+            should = True
+    else:
+        triggers.append("no prior audit")
+        should = True
+
+    # Check if agent files changed
+    agent_dir = root / "opencode-agent-pack" / "agents"
+    if agent_dir.is_dir():
+        for af in agent_dir.glob("*.md"):
+            try:
+                if last_audit_path.exists():
+                    af_mtime = af.stat().st_mtime
+                    last_ts = float(last_audit_path.read_text().strip()) if last_audit_path.stat().st_size > 0 else 0
+                    if af_mtime > last_ts:
+                        triggers.append(f"agent changed: {af.name}")
+                        should = True
+            except Exception:
+                # Can't determine — conservative: run
+                triggers.append(f"agent modified: {af.name}")
+                should = True
+
+    # Check if runtime/plugin files changed
+    runtime_dir = root / "opencode-agent-pack" / "runtime"
+    if runtime_dir.is_dir():
+        for f in runtime_dir.rglob("*"):
+            if f.is_file():
+                try:
+                    if last_audit_path.exists():
+                        last_ts = float(last_audit_path.read_text().strip()) if last_audit_path.stat().st_size > 0 else 0
+                        if f.stat().st_mtime > last_ts:
+                            triggers.append(f"runtime/plugin changed: {f.name}")
+                            should = True
+                except Exception:
+                    pass
+
+    # Check if permissions config changed
+    for perm_path in (
+        root / ".opencode" / "permissions.json",
+        Path(os.path.expanduser("~")) / ".config" / "opencode" / "permissions.json",
+    ):
+        if perm_path.is_file():
+            try:
+                if last_audit_path.exists():
+                    last_ts = float(last_audit_path.read_text().strip()) if last_audit_path.stat().st_size > 0 else 0
+                    if perm_path.stat().st_mtime > last_ts:
+                        triggers.append(f"permissions changed: {perm_path.name}")
+                        should = True
+            except Exception:
+                pass
+
+    # Check if installer changed
+    installer = root / "agent.sh"
+    if installer.is_file():
+        try:
+            if last_audit_path.exists():
+                last_ts = float(last_audit_path.read_text().strip()) if last_audit_path.stat().st_size > 0 else 0
+                if installer.stat().st_mtime > last_ts:
+                    triggers.append("installer changed: agent.sh")
+                    should = True
+        except Exception:
+            pass
+
+    # Check if context schema changed
+    context_idx = root / ".heidi" / "context-index.json"
+    if context_idx.is_file():
+        try:
+            with open(context_idx) as f:
+                idx = json.load(f)
+            if idx.get("schema_version") != "2.0.0":
+                triggers.append("context schema version changed")
+                should = True
+        except Exception:
+            pass
+
+    # Check for repeated ledger failures
+    ledger_path = root / ".heidi" / "task-ledger.jsonl"
+    if ledger_path.is_file():
+        try:
+            fail_count = 0
+            recency_threshold = time.time() - 3600  # last hour
+            with open(ledger_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if rec.get("status") in ("fail", "blocked"):
+                            fail_count += 1
+                    except json.JSONDecodeError:
+                        pass
+            if fail_count >= 3:
+                triggers.append(f"repeated ledger failures ({fail_count} in recent window)")
+                should = True
+        except Exception:
+            pass
+
+    result = {
+        "should_run": should,
+        "triggers": triggers,
+        "interval_s": interval,
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+    # Touch the last-audit file if running
+    if should and args.root:
+        last_audit_path.parent.mkdir(parents=True, exist_ok=True)
+        last_audit_path.write_text(str(time.time()))
+
+
+# ──────────────────────────────────────────────────────────────────
+# diff command
+# ──────────────────────────────────────────────────────────────────
+
+def cmd_diff(args):
+    """Diff audit findings between baseline and current commit."""
+    root = Path(args.root)
+    baseline = args.baseline
+    current = args.current or "HEAD"
+
+    # Run audit at both commits
+    baseline_findings = _audit_at_commit(root, baseline)
+    current_findings = _audit_at_commit(root, current)
+
+    baseline_ids = {f["id"] for f in baseline_findings}
+    current_ids = {f["id"] for f in current_findings}
+
+    new_findings = current_ids - baseline_ids
+    resolved_findings = baseline_ids - current_ids
+
+    result = {
+        "baseline": baseline,
+        "current": current,
+        "baseline_findings_count": len(baseline_findings),
+        "current_findings_count": len(current_findings),
+        "new_findings": sorted(new_findings),
+        "resolved_findings": sorted(resolved_findings),
+        "delta": len(current_findings) - len(baseline_findings),
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+def _audit_at_commit(root, commit_ref):
+    """Run proactive audit at a specific git commit. Returns list of finding dicts."""
+    findings = []
+
+    # Try to run against the current working tree or a specific commit.
+    # For simplicity, we run CHECKLIST against the root if we're on the right commit,
+    # or we mark it as unavailable.
+    CHECKLIST_LOCAL = CHECKLIST  # use existing checks
+
+    for check_id, severity, desc, checker in CHECKLIST_LOCAL:
+        try:
+            if checker(root, {}):
+                findings.append({
+                    "id": check_id,
+                    "severity": severity,
+                    "description": desc,
+                })
+        except Exception:
+            pass
+
+    return findings
+
+
 def main():
     parser = argparse.ArgumentParser(description="Proactive Audit")
-    parser.add_argument("--root", required=True)
-    parser.add_argument("--context")
-    parser.add_argument("--out")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_run = sub.add_parser("run", help="Run proactive audit")
+    p_run.add_argument("--root", required=True)
+    p_run.add_argument("--context")
+    p_run.add_argument("--out")
+
+    p_should = sub.add_parser("should-run", help="Check if audit should run")
+    p_should.add_argument("--root", required=True)
+    p_should.add_argument("--interval", help="Interval in seconds (default: 86400)")
+
+    p_diff = sub.add_parser("diff", help="Diff audit findings between commits")
+    p_diff.add_argument("--root", required=True)
+    p_diff.add_argument("--baseline", required=True, help="Baseline commit")
+    p_diff.add_argument("--current", help="Current commit (default: HEAD)")
+
     args = parser.parse_args()
-    cmd_run(args)
+
+    if args.command == "run":
+        cmd_run(args)
+    elif args.command == "should-run":
+        cmd_should_run(args)
+    elif args.command == "diff":
+        cmd_diff(args)
 
 
 if __name__ == "__main__":

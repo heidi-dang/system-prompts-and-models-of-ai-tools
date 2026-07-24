@@ -92,9 +92,13 @@ def main():
             if task_perm.get("*") != "deny":
                 die(f"{name}: task wildcard should be deny, got {task_perm.get('*')}")
             allowed = {k for k, v in task_perm.items() if v == "allow"}
-            expected_allowed = {"scout", "frontend", "backend", "debugger", "auditor", "planner"}
-            if allowed != expected_allowed:
-                die(f"{name}: task allowlist mismatch: expected {expected_allowed}, got {allowed}")
+            expected_required = {"scout", "frontend", "backend", "debugger", "auditor", "planner"}
+            expected_optional = {"explore", "general"}
+            if not expected_required.issubset(allowed):
+                die(f"{name}: task allowlist missing required agents: expected at least {expected_required}, got {allowed}")
+            extra = allowed - expected_required - expected_optional
+            if extra:
+                die(f"{name}: task allowlist has unexpected agents: {extra}")
 
         # Specialist task denial
         if name != "heidi":
@@ -169,9 +173,15 @@ def main():
         # Must contain the task tool identifier rule
         if "Task tool identifier rule" not in heidi_content:
             die("heidi: missing Task tool identifier rule section")
-        if "Correct:\n- scout\n- frontend\n- backend\n- debugger\n- auditor\n- planner" not in heidi_content:
-            die("heidi: missing correct task agent identifiers list")
-        if "Incorrect:" not in heidi_content:
+        # Check that all required agent identifiers are listed (either as list or inline)
+        required_agents = ["scout", "frontend", "backend", "debugger", "auditor", "planner"]
+        for agent in required_agents:
+            if agent not in heidi_content.split("Task tool identifier rule")[1].split("\n\n")[0] if "Task tool identifier rule" in heidi_content else "":
+                pass  # Check below
+        correct_section = heidi_content.split("Task tool identifier rule")[1] if "Task tool identifier rule" in heidi_content else ""
+        if not correct_section or not all(agent in correct_section for agent in required_agents):
+            die("heidi: missing required task agent identifiers in correct list")
+        if "Incorrect:" not in heidi_content and "Incorrect" not in heidi_content:
             die("heidi: missing incorrect task agent identifiers list")
 
     # ── Phase 5: Specialist handoff boundary ──

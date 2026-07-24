@@ -806,16 +806,13 @@ install_mode() {
   if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime" ]; then
     echo "=== Installing Runtime Orchestration ==="
 
-    # Define managed runtime file list for migration (known paths only, no wildcards)
+    # Managed runtime files (known paths only, no wildcards for safety)
     MANAGED_RUNTIME_FILES=(
       "heidi-orchestration.md"
       "orchestration.prompt.md"
       "compatibility.json"
       "recovery-policy.json"
       "runtime-policy.json"
-    )
-    MANAGED_RUNTIME_DIRS=(
-      "prompts"
     )
 
     # Migrate: remove stale runtime/ directories from agent discovery paths
@@ -1220,13 +1217,13 @@ if [ "$DO_UNINSTALL" = true ]; then
     fi
   done
   # Remove private heidi-runtime directory
-  local runtime_base
+  runtime_base=""
   if [ -n "${OPENCODE_CONFIG_DIR:-}" ]; then
     runtime_base="$CONFIG_DIR"
   else
     runtime_base="$HOME/.config/opencode"
   fi
-  local private_runtime_dir="$runtime_base/heidi-runtime"
+  private_runtime_dir="$runtime_base/heidi-runtime"
   if [ -d "$private_runtime_dir" ]; then
     echo "  Removing private runtime: $private_runtime_dir"
     rm -rf "$private_runtime_dir"

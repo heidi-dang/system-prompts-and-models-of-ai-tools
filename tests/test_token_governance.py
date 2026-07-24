@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "opencode-agent-pack" / "scripts"))
 
 from token_budget import TokenBudgetManager, DEFAULT_POLICY, estimate_tokens_from_text
-from token_estimator import estimate_tokens, estimate_cost, simulate_task, simulate_27m_scenario
+from token_estimator import estimate_tokens, estimate_cost, simulate_task, simulate_27m_scenario, simulate_27m_governed
 from delegation_handoff import (
     build_handoff, build_followup_handoff, validate_handoff_size,
     fingerprint_handoff, DEFAULT_DELEGATION_CONTEXT_LIMIT, MAX_DELEGATION_CONTEXT_LIMIT,
@@ -244,6 +244,17 @@ class TestTokenEstimator(unittest.TestCase):
         self.assertIn("scout_full_context", result["breakdown"])
         self.assertIn("auditor_full_context", result["breakdown"])
         self.assertIn("second_audit_cycle", result["breakdown"])
+
+    def test_simulate_27m_governed(self):
+        """Governed scenario should be smaller than unbounded by >80%."""
+        governed = simulate_27m_governed()
+        unbounded = simulate_27m_scenario()
+        self.assertLess(governed["total_tokens"], unbounded["total_tokens"] * 0.2)
+        self.assertGreater(governed["model_calls"], 0)
+        self.assertGreater(governed["subagent_calls"], 0)
+        self.assertIn("budget_warning_triggered", governed)
+        self.assertIn("hard_stop_triggered", governed)
+        self.assertIn("policy_limits", governed)
 
     def test_estimate_cost_known_model(self):
         est = estimate_tokens(output_chars=1000, model="gpt-4o")

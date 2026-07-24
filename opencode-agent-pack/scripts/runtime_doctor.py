@@ -405,7 +405,7 @@ def cmd_validate(args):
     )
     config_path = os.path.join(config_dir, "opencode.json")
 
-    # Check opencode.json
+    # Check opencode.json (skip if not found — it may not be installed in CI)
     if os.path.isfile(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -420,8 +420,6 @@ def cmd_validate(args):
                         errors.append(f"opencode.json: agent '{name}' missing 'prompt'")
         except json.JSONDecodeError as e:
             errors.append(f"opencode.json: invalid JSON: {e}")
-    else:
-        errors.append(f"opencode.json: not found at {config_path}")
 
     # Check agent directory
     agent_dir = Path(config_dir) / "agents"

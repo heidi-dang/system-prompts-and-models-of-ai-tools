@@ -1,0 +1,220 @@
+name: Heidi Agent Pack CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent.sh"
+      - "opencode-agent-pack/**"
+      - "tests/**"
+      - "benchmarks/**"
+      - ".github/workflows/heidi-agent-pack-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "agent.sh"
+      - "opencode-agent-pack/**"
+      - "tests/**"
+      - "benchmarks/**"
+      - ".github/workflows/heidi-agent-pack-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  static:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck python3-yaml
+      - name: Bash syntax check
+        run: bash -n agent.sh
+      - name: ShellCheck
+        run: shellcheck agent.sh
+      - name: Validate agent definitions
+        run: python3 tests/validate_agents.py
+      - name: Generated prompt check
+        run: python3 opencode-agent-pack/scripts/gen-prompts.py --check || true
+      - name: Prompt size stats
+        run: python3 opencode-agent-pack/scripts/gen-prompts.py --stats || true
+      - name: Validate memory utility
+        run: python3 -m unittest tests.test_memory -v
+      - name: Context memory tests
+        run: python3 -m unittest tests.test_context_memory -v
+      - name: Task ledger tests
+        run: python3 -m unittest tests.test_task_ledger -v
+      - name: Strategy selector tests
+        run: python3 -m unittest tests.test_strategy_selector -v
+      - name: Prompt proposals tests
+        run: python3 -m unittest tests.test_prompt_proposals -v
+      - name: Proactive audit tests
+        run: python3 -m unittest tests.test_proactive_audit -v
+      - name: Native prompt composition tests
+        run: python3 -m unittest tests.test_native_prompt_composition -v
+      - name: Fast path tests
+        run: python3 -m unittest tests.test_fast_path -v
+      - name: Verified memory tests
+        run: python3 -m unittest tests.test_verified_memory -v
+      - name: Failure classifier tests
+        run: python3 -m unittest tests.test_failure_classifier -v
+      - name: Native agent routing tests
+        run: python3 -m unittest tests.test_native_agent_routing -v
+      - name: Benchmark tests
+        run: python3 -m unittest tests.test_benchmark -v
+      - name: Runtime events tests
+        run: python3 -m unittest tests.test_runtime_events -v
+
+  installer:
+    name: Installer tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python YAML
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3-yaml
+      - name: Run installer test suite
+        run: bash tests/test_installer.sh
+      - name: Validate agent definitions
+        run: python3 tests/validate_agents.py
+      - name: Test runtime doctor
+        run: bash agent.sh --runtime-doctor || echo "Runtime doctor completed (OpenCode may not be available)"
+      - name: Test benchmark smoke
+        run: bash agent.sh --benchmark-smoke || echo "Benchmark smoke completed"
+
+  runtime:
+    name: Runtime discovery (OpenCode)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash || true
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+      - name: Verify OpenCode installed
+        id: check_opencode
+        run: |
+          if command -v opencode &>/dev/null || [ -f "$HOME/.opencode/bin/opencode" ]; then
+            echo "installed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "OpenCode installation failed (URL may have moved)"
+          fi
+      - name: Install agents globally
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: |
+          export OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
+          bash agent.sh --install --global
+      - name: Verify agent discovery
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: |
+          opencode agent list 2>&1 || true
+          opencode debug config 2>&1 | head -40 || true
+      - name: Run runtime doctor agent-discovery
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py agent-discovery
+      - name: Verify no Runtime in agent list
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: |
+          if opencode agent list 2>&1 | grep -qiE 'Runtime|runtime\.bak|Prompt/Core|Prompt/Routing|Heidi-Orchestration|Orchestration\.prompt'; then
+            echo "FAIL: Runtime/prompt fragments found in agent list"
+            exit 1
+          fi
+          echo "Agent list clean"
+      - name: Run runtime doctor
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: bash agent.sh --runtime-doctor
+      - name: Native prompt composition probe
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt
+
+  agent-discovery-regression:
+    name: Agent discovery regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run agent discovery tests
+        run: python3 -m unittest tests.test_agent_discovery -v
+      - name: Broken install repair fixture
+        run: |
+          set -e
+          TEST_ROOT=$(mktemp -d)
+          export HOME="$TEST_ROOT/home"
+          export OPENCODE_CONFIG_DIR="$TEST_ROOT/opencode"
+          mkdir -p "$HOME" "$OPENCODE_CONFIG_DIR/agents"
+          # Create broken state
+          mkdir -p "$OPENCODE_CONFIG_DIR/agents/runtime/prompts"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime/heidi-orchestration.md"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime/prompts/core.md"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime/prompts/routing.md"
+          mkdir -p "$OPENCODE_CONFIG_DIR/agents/runtime.bak.20260724-051140/prompts"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime.bak.20260724-051140/prompts/core.md"
+          # Run repair
+          bash agent.sh --repair-agent-discovery --dry-run
+          bash agent.sh --repair-agent-discovery
+          # Run again (idempotent)
+          bash agent.sh --repair-agent-discovery
+          # Validate
+          python3 opencode-agent-pack/scripts/runtime_doctor.py agent-discovery || true
+          # Clean install test
+          rm -rf "$TEST_ROOT"
+      - name: Clean install prevents flooding
+        run: |
+          set -e
+          CLEAN_ROOT=$(mktemp -d)
+          export HOME="$CLEAN_ROOT/home"
+          export OPENCODE_CONFIG_DIR="$CLEAN_ROOT/opencode"
+          mkdir -p "$HOME" "$OPENCODE_CONFIG_DIR"
+          bash agent.sh --install --global
+          bash agent.sh --install --global
+          # Verify no Runtime/ or .bak.* in agent dir
+          if find "$OPENCODE_CONFIG_DIR/agents" -maxdepth 1 \( -iname 'runtime*' -o -iname '*.bak.*' \) | grep -q .; then
+            echo "FAIL: runtime or backup folders remain in agent discovery path"
+            find "$OPENCODE_CONFIG_DIR/agents" -maxdepth 1 \( -iname 'runtime*' -o -iname '*.bak.*' \)
+            exit 1
+          fi
+          echo "Agent discovery path clean"
+          rm -rf "$CLEAN_ROOT"
+
+  benchmark-smoke:
+    name: Benchmark smoke (deterministic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run benchmark validation
+        run: python3 opencode-agent-pack/scripts/benchmark.py validate
+      - name: Run benchmark smoke via agent.sh
+        run: bash agent.sh --benchmark-smoke
+      - name: Verify benchmark tasks
+        run: python3 -m unittest tests.test_benchmark -v
+
+  optional-real-model:
+    name: Real-model benchmark (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash || true
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+      - name: Run real-model benchmarks
+        run: |
+          python3 opencode-agent-pack/scripts/benchmark.py run \
+            --agent build \
+            --agent heidi \
+            --model current \
+            --suite smoke \
+            --results benchmarks/results || echo "Real-model benchmarks skipped (no model configured)"
+      - name: Compare results
+        run: |
+          python3 opencode-agent-pack/scripts/benchmark.py compare \
+            --baseline build \
+            --candidate heidi \
+            --results benchmarks/results || echo "Comparison skipped"
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/results/
+          retention-days: 30

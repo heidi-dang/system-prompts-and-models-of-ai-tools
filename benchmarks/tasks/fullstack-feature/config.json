@@ -1,0 +1,19 @@
+{
+  "task_id": "fullstack-feature-001",
+  "task_name": "Add User Profile Page",
+  "task_category": "fullstack-feature",
+  "description": "Add a complete user profile page with frontend UI and backend endpoint",
+  "request": "Add a user profile page at /profile that shows the user's name, email, and avatar. Requires a backend API endpoint and a React component.",
+  "expected": {
+    "max_files_changed": 10,
+    "tests_must_pass": ["test_profile_api.py", "test_profile_page.tsx"],
+    "completion_required": true
+  },
+  "forbidden": {
+    "no_config_changes": false
+  },
+  "timeout_seconds": 900,
+  "complexity": "large",
+  "risk": "medium",
+  "fast_path_applicable": false
+}

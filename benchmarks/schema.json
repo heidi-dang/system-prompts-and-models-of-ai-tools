@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Legendary Heidi Benchmark Schema",
+  "type": "object",
+  "required": ["schema_version", "task_id", "task_name", "task_category", "description", "request", "expected", "forbidden"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "task_id": { "type": "string" },
+    "task_name": { "type": "string" },
+    "task_category": {
+      "type": "string",
+      "enum": ["fast-one-line-edit", "isolated-bug", "unfamiliar-code-search", "failing-ci", "fullstack-feature", "database-change", "production-audit"]
+    },
+    "description": { "type": "string" },
+    "request": { "type": "string" },
+    "fixture_repository": { "type": "string" },
+    "fixture_commit": { "type": "string" },
+    "expected": {
+      "type": "object",
+      "properties": {
+        "files_changed": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "max_files_changed": { "type": "integer" },
+        "tests_must_pass": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "completion_required": { "type": "boolean" }
+      }
+    },
+    "forbidden": {
+      "type": "object",
+      "properties": {
+        "files_untouched": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "no_new_files": { "type": "boolean" },
+        "no_config_changes": { "type": "boolean" }
+      }
+    },
+    "timeout_seconds": { "type": "integer", "default": 300 },
+    "complexity": {
+      "type": "string",
+      "enum": ["small", "medium", "large"]
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    }
+  }
+}

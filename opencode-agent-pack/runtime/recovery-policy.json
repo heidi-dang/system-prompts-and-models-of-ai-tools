@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0.0",
+  "recovery_policy": {
+    "default_max_retries": 3,
+    "circuit_breaker_threshold": 3,
+    "categories": {
+      "implementation": {
+        "max_retries": 3,
+        "permitted_strategies": ["direct", "scout_then_execute", "debugger_root_cause"],
+        "escalation_condition": "same_error_three_times",
+        "user_checkpoint": false
+      },
+      "test_expectation": {
+        "max_retries": 2,
+        "permitted_strategies": ["direct", "planner_then_execute"],
+        "escalation_condition": "test_expectation_mismatch",
+        "user_checkpoint": false
+      },
+      "dependency": {
+        "max_retries": 2,
+        "permitted_strategies": ["direct"],
+        "escalation_condition": "dependency_unresolved",
+        "user_checkpoint": true
+      },
+      "environment": {
+        "max_retries": 1,
+        "permitted_strategies": [],
+        "escalation_condition": "environment_not_fixable",
+        "user_checkpoint": true
+      },
+      "permission": {
+        "max_retries": 1,
+        "permitted_strategies": [],
+        "escalation_condition": "permission_denied",
+        "user_checkpoint": true
+      },
+      "context": {
+        "max_retries": 2,
+        "permitted_strategies": ["scout_then_execute"],
+        "escalation_condition": "context_insufficient",
+        "user_checkpoint": false
+      },
+      "configuration": {
+        "max_retries": 2,
+        "permitted_strategies": ["direct"],
+        "escalation_condition": "config_unresolvable",
+        "user_checkpoint": true
+      },
+      "tool_invocation": {
+        "max_retries": 3,
+        "permitted_strategies": ["direct"],
+        "escalation_condition": "tool_failure_repeated",
+        "user_checkpoint": false
+      },
+      "external_service": {
+        "max_retries": 3,
+        "permitted_strategies": ["direct"],
+        "escalation_condition": "external_unavailable",
+        "user_checkpoint": true
+      },
+      "unknown": {
+        "max_retries": 2,
+        "permitted_strategies": ["scout_then_execute", "debugger_root_cause"],
+        "escalation_condition": "unknown_failure_pattern",
+        "user_checkpoint": true
+      }
+    }
+  },
+  "circuit_breaker": {
+    "enabled": true,
+    "max_consecutive_failures": 3,
+    "reset_after_success": true,
+    "cooldown_seconds": 300
+  }
+}

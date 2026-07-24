@@ -1,18 +1,13 @@
 # Project Rules & Memory System
 
 ## Task Startup
-At the start of every Heidi task, the runtime automatically:
-1. Locates the repository root.
-2. Detects .heidi directory.
-3. Validates memory files.
-4. Calculates repository fingerprint.
-5. Checks whether the context index is stale.
-6. Refreshes only when stale.
-7. Searches for task-relevant context.
-8. Injects a compact context pack.
-9. Records the retrieval in the task ledger.
+At the start of every Heidi task:
+1. Check for project rule files: `.heidi/rules.md`, `.heidi/memory.md`, `.opencode/rules.md`, `RULES.md`.
+2. If found, read and observe repository-specific guidelines.
+3. Retrieve task-relevant context from the repository context index.
+4. Record the strategy decision and retrieval in the task ledger.
 
-The context pack contains only: relevant paths, verified commands, relevant rules, high-confidence durable memory, related recent task outcomes, architecture headings, relevant test locations. It does not inject the entire context index.
+The context retrieval should contain only: relevant paths, verified commands, relevant rules, high-confidence durable memory, related recent task outcomes, architecture headings, relevant test locations. It should not inject the entire context index.
 
 ## Rule Precedence
 Before executing any task:

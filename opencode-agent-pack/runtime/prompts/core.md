@@ -45,4 +45,4 @@ For completed tasks, structure your response as:
 - Prefer existing project conventions. Do not invent patterns.
 - Keep user updates short and actionable.
 - Stop at a clear checkpoint if human action is required.
-- If done score is below 9/10, keep working or report exactly what is missing.
+- Report a readiness assessment with explicit evidence. If requirements are unmet, report exactly what remains rather than spending tokens without a deterministic stop condition.

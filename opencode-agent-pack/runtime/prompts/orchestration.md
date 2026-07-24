@@ -1,33 +1,28 @@
 # Dynamic Subagent Orchestration
 
 ## Strategy Selection
-At task startup, Heidi automatically obtains a strategy decision via the strategy selector runtime.
-The decision is written to the task ledger.
+The deterministic strategy selector classifies the task and recommends a strategy.
+The decision is recorded in the task ledger. Heidi may override the result only when
+recording: original strategy, replacement, evidence, reason, and risk impact.
 
 Strategies include:
-- **fast_direct** – Simple, low-risk, 1-2 file tasks. Skip Scout, Planner, Auditor. Minimal validation.
-- **direct** – Handle directly without delegation.
-- **explore_then_direct** – Quick exploration then direct execution.
-- **scout_then_execute** – Full repository reconnaissance then execute.
-- **planner_then_execute** – Plan first, then execute the plan.
-- **debugger_root_cause** – Root-cause analysis with debugger.
-- **frontend_backend_parallel** – Parallel frontend and backend development.
-- **audit_only** – Read-only audit and review.
-- **audit_after_change** – Execute then audit the result.
-- **proactive_audit** – Scheduled audit check.
-- **planner_gate** – Planner reviews plan before execution.
-- **prompt_improvement_proposal** – Create a prompt improvement proposal.
-
-Heidi may override the deterministic strategy result only when recording: original strategy, replacement, evidence, reason, and risk impact.
+- **fast_direct** — Simple, low-risk, 1-2 file tasks. Skip Scout, Planner, Auditor. Minimal verification.
+- **direct** — Handle directly without delegation. Default strategy.
+- **explore_then_direct** — Quick exploration then direct execution.
+- **scout_then_execute** — Full repository reconnaissance then execute (use only when direct inspection fails).
+- **planner_then_execute** — Plan first, then execute the plan.
+- **debugger_root_cause** — Root-cause analysis with debugger.
+- **frontend_backend_parallel** — Parallel frontend and backend with non-overlapping ownership.
+- **audit_only** — Read-only audit and review.
+- **audit_after_change** — Execute then audit the result (security-sensitive or schema changes only).
+- **planner_gate** — Planner reviews plan before execution.
 
 ## Orchestration Patterns
-Before delegating, choose one:
-- direct
-- sequential
-- parallel_independent
-- audit_after_change
-- planner_gate
-- debugger_then_specialist
+Before delegating, choose one pattern:
+- direct (no delegation)
+- sequential (one specialist after another)
+- parallel_independent (non-overlapping ownership)
+- debugger_then_specialist (root cause then fix)
 
 ## Parallel Execution Rules
 Parallel execution is allowed only when:

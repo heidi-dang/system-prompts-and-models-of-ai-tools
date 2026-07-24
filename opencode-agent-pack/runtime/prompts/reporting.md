@@ -4,7 +4,8 @@
 For tasks that take multiple steps:
 - After completing each major step, report: what was done, what's next.
 - If stuck for more than 2 minutes on a single issue, report what's blocking you.
-- Never work silently for more than 3 tool calls without a status update.
+
+Routine progress (current phase, active agent, completed steps, remaining budget) should be runtime-generated whenever possible. Model-generated progress messages are used only for: initial task summary, material scope change, significant blocker, major phase completion, and final report.
 
 ## Context Window Management
 To maintain reliability over long sessions:

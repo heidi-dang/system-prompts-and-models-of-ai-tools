@@ -1,234 +1,344 @@
 #!/usr/bin/env python3
 """
-Strategy Selector — deterministic rule-based strategy selection for Heidi.
+Strategy Selector — deterministic normalized classification for Heidi.
+
+Uses exact word/phrase token matching with weighted signals instead of
+substring matching. Reports confidence, uncertainty, and fallback reasons.
 
 Commands:
   select --task <t> [--context <f>]   Select a strategy for the task
-  fast-path-check --task <t> [--context <f>]  Check if fast path applies
+  fast-path-check --task <t>          Check if fast path applies
   validate <file>                     Validate strategies config file
 """
 
 import argparse
 import json
+import re
 import sys
+from collections import Counter
 from pathlib import Path
 
-STRATEGY_RULES = [
-    {
-        "strategy": "prompt_improvement_proposal",
-        "keywords": ["prompt", "agent instruction", "agent behavior", "improve prompt", "rewrite agent"],
-        "context_signals": [],
+# ── Normalized strategy definitions ─────────────────────────────
+
+# Each strategy has: exact phrases (must match word-boundary), weighted signals
+# (these add score but don't decide alone), context requirements, and priority.
+
+STRATEGY_DEFS = {
+    "audit_only": {
         "priority": 10,
+        "exact_phrases": [
+            "code review", "security review", "architecture review", "pr review",
+            "production readiness review", "regression review", "full audit",
+            "audit the", "audit this", "audit our", "audit my", "audit codebase",
+        ],
+        "single_words": ["audit"],
+        "signals": {},
+        "agents": ["auditor"],
     },
-    {
-        "strategy": "audit_only",
-        "keywords": ["audit", "code review", "security review", "review"],
-        "context_signals": [],
-        "priority": 10,
-    },
-    {
-        "strategy": "debugger_root_cause",
-        "keywords": ["ci", "failing", "broken build", "bug", "regression", "test failure", "401", "403", "500", "502", "crash"],
-        "context_signals": ["test_files"],
+    "debugger_root_cause": {
         "priority": 9,
+        "exact_phrases": [
+            "failing test", "broken build", "test failure", "production bug",
+            "ci failure", "ci failing", "failing ci", "pipeline failure", "build broken",
+            "http 401", "http 403", "http 500", "http 502", "segfault",
+        ],
+        "single_words": ["regression", "crash"],
+        "signals": {"test_files": True},
+        "agents": ["debugger", "auditor"],
     },
-    {
-        "strategy": "frontend_backend_parallel",
-        "keywords": ["frontend", "backend", "ui", "api", "database", "migration"],
-        "context_signals": [],
+    "frontend_backend_parallel": {
         "priority": 8,
+        "exact_phrases": [
+            "frontend and backend", "ui and api", "full stack",
+            "fullstack", "front end and back end",
+        ],
+        "single_words": ["frontend", "backend"],
+        "signals": {},
         "requires_both_domains": True,
+        "agents": ["frontend", "backend"],
     },
-    {
-        "strategy": "explore_then_direct",
-        "keywords": ["new", "unfamiliar", "explore", "investigate"],
-        "context_signals": [],
+    "scout_then_execute": {
         "priority": 7,
-        "description": "Use native explore agent when available, then direct execution",
+        "exact_phrases": [
+            "architecture plan", "design spec", "roadmap planning",
+            "new repository", "unfamiliar codebase", "project scaffold",
+            "project roadmap", "architecture roadmap",
+        ],
+        "single_words": ["architecture", "design", "roadmap"],
+        "signals": {},
+        "agents": ["scout"],
     },
-    {
-        "strategy": "scout_then_execute",
-        "keywords": ["roadmap", "plan", "feature", "architecture", "design", "spec"],
-        "context_signals": [],
-        "priority": 7,
-    },
-    {
-        "strategy": "planner_gate",
-        "keywords": ["large feature", "major change", "refactor", "migration plan"],
-        "context_signals": [],
-        "priority": 5,
-    },
-    {
-        "strategy": "audit_after_change",
-        "keywords": ["security", "auth", "permission", "deployment", "production"],
-        "context_signals": [],
+    "explore_then_direct": {
         "priority": 6,
-        "description": "Run audit after making changes",
+        "exact_phrases": [
+            "explore the codebase", "investigate the project",
+            "find all", "locate the definition",
+        ],
+        "single_words": ["explore", "investigate"],
+        "signals": {},
+        "agents": ["scout", "heidi"],
     },
-    {
-        "strategy": "fast_direct",
-        "keywords": [],
-        "context_signals": [],
-        "priority": 0,
-        "description": "Fast path for trivial single-file changes",
+    "audit_after_change": {
+        "priority": 6,
+        "exact_phrases": [
+            "authentication change", "authorization change", "permission change",
+            "security fix", "schema migration", "deploy to production",
+            "production deploy",
+        ],
+        "single_words": ["auth", "permission", "migration"],
+        "signals": {},
+        "agents": ["heidi", "auditor"],
     },
-    {
-        "strategy": "direct_single_agent",
-        "keywords": [],
-        "context_signals": [],
+    "planner_gate": {
+        "priority": 5,
+        "exact_phrases": [
+            "major refactor", "large feature", "migration plan", "re-architecture",
+        ],
+        "single_words": ["refactor", "rewrite"],
+        "signals": {},
+        "agents": ["planner"],
+    },
+    "scout_only": {
+        "priority": 4,
+        "exact_phrases": ["project profile", "stack detection", "directory map"],
+        "single_words": [],
+        "signals": {},
+        "agents": ["scout"],
+    },
+    "fast_direct": {
+        "priority": 1,
+        "exact_phrases": [],
+        "single_words": [],
+        "signals": {},
+        "agents": ["heidi"],
+        "fallback": False,
+    },
+    "direct_single_agent": {
         "priority": 0,
+        "exact_phrases": [],
+        "single_words": [],
+        "signals": {},
+        "agents": ["heidi"],
         "fallback": True,
     },
-]
-
-STRATEGY_AGENTS = {
-    "prompt_improvement_proposal": ["auditor", "heidi"],
-    "audit_only": ["auditor"],
-    "debugger_root_cause": ["debugger", "auditor"],
-    "frontend_backend_parallel": ["frontend", "backend"],
-    "scout_then_execute": ["scout"],
-    "explore_then_direct": ["scout", "heidi"],
-    "planner_gate": ["planner"],
-    "audit_after_change": ["heidi", "auditor"],
-    "fast_direct": ["heidi"],
-    "direct_single_agent": ["heidi"],
-}
-
-STRATEGY_PARALLEL = {
-    "frontend_backend_parallel": True,
-}
-
-STRATEGY_REQUIRES_SCOUT = {
-    "scout_then_execute": True,
-    "explore_then_direct": True,
-}
-
-STRATEGY_REQUIRES_AUDITOR = {
-    "audit_only": True,
-    "audit_after_change": True,
-    "prompt_improvement_proposal": True,
 }
 
 STRATEGY_COMPLEXITY = {
+    "audit_only": "medium",
+    "debugger_root_cause": "medium",
+    "frontend_backend_parallel": "large",
+    "scout_then_execute": "medium",
+    "explore_then_direct": "small",
+    "audit_after_change": "medium",
+    "planner_gate": "large",
+    "scout_only": "small",
     "fast_direct": "small",
     "direct_single_agent": "small",
-    "explore_then_direct": "small",
-    "scout_then_execute": "medium",
-    "debugger_root_cause": "medium",
-    "audit_after_change": "medium",
-    "frontend_backend_parallel": "large",
-    "planner_gate": "large",
-    "prompt_improvement_proposal": "large",
-    "audit_only": "medium",
 }
 
+# Audit is read-only — not critical risk unless sensitive code is explicitly involved
 STRATEGY_RISK = {
+    "audit_only": "low",
+    "debugger_root_cause": "medium",
+    "frontend_backend_parallel": "medium",
+    "scout_then_execute": "medium",
+    "explore_then_direct": "low",
+    "audit_after_change": "medium",
+    "planner_gate": "high",
+    "scout_only": "low",
     "fast_direct": "low",
     "direct_single_agent": "low",
-    "explore_then_direct": "low",
-    "scout_then_execute": "medium",
-    "debugger_root_cause": "medium",
-    "audit_after_change": "medium",
-    "frontend_backend_parallel": "medium",
-    "planner_gate": "high",
-    "prompt_improvement_proposal": "high",
-    "audit_only": "critical",
 }
 
+STRATEGY_PARALLEL = {"frontend_backend_parallel": True}
 
-def has_both_domains(task_lower):
-    frontend_words = {"frontend", "ui", "component", "react", "tailwind", "css", "layout", "page", "form"}
-    backend_words = {"backend", "api", "database", "prisma", "migration", "server", "endpoint", "auth"}
-    has_fe = bool(frontend_words & set(task_lower.split()))
-    has_be = bool(backend_words & set(task_lower.split()))
-    return has_fe and has_be
+# ── Fast-path disqualifiers (only substantive patterns, not single common words) ──
+
+FAST_PATH_DISQUALIFIERS = [
+    (r'\bauth(?:entication|orization)?\b', "auth-related change"),
+    (r'\bpermission\b', "permission-related change"),
+    (r'\bdatabase\b', "database change"),
+    (r'\bschema\s+migration\b', "schema migration"),
+    (r'\bdeploy(?:ment)?\s+to\s+production\b', "production deployment"),
+    (r'\bproduction\s+(?:deploy|release|bug)\b', "production change"),
+    (r'\barchitecture\s+(?:decision|review|change)\b', "architecture decision"),
+    (r'\brefactor\b', "multi-file refactor"),
+    (r'\bpipeline\s+(?:failure|broken)\b', "pipeline failure"),
+    (r'\bencrypt(?:ion)?\b', "security-related"),
+    (r'\binfrastructure\s+change\b', "infrastructure change"),
+]
 
 
-def cmd_select(args):
-    task_lower = args.task.lower()
+# ── Helpers ──────────────────────────────────────────────────────
 
+def tokenize(text):
+    """Normalize to lowercase word tokens."""
+    return re.findall(r'[a-z0-9]+(?:-[a-z0-9]+)*', text.lower())
+
+
+def match_exact_phrases(tokens, phrases):
+    """Check if any exact phrase (as word sequence) appears in token sequence."""
+    text = " " + " ".join(tokens) + " "
+    for phrase in phrases:
+        phrase_tokens = phrase.split()
+        pattern = r'\s' + r'\s+'.join(re.escape(t) for t in phrase_tokens) + r'\s'
+        if re.search(pattern, text):
+            return phrase
+    return None
+
+
+def match_single_words(tokens, words):
+    """Check if any single word appears as a whole-word token."""
+    token_set = set(tokens)
+    return [w for w in words if w in token_set]
+
+
+def has_both_domains(tokens):
+    """Check if task involves both frontend and backend domains."""
+    frontend = {"frontend", "ui", "component", "react", "tailwind", "css", "layout", "page", "form", "button"}
+    backend = {"backend", "api", "database", "prisma", "migration", "server", "endpoint"}
+    token_set = set(tokens)
+    return bool(frontend & token_set) and bool(backend & token_set)
+
+
+# ── Fast path check ──────────────────────────────────────────────
+
+def check_fast_path(task, context_path=None):
+    """Check whether fast path applies.
+
+    Returns dict with applies, reason, confidence.
+    """
+    task_lower = task.lower()
+    tokens = tokenize(task_lower)
+
+    # Disqualifiers: substantive patterns only (not "config", "ci", "review", "plugin" alone)
+    for pattern, reason in FAST_PATH_DISQUALIFIERS:
+        if re.search(pattern, task_lower):
+            return {"applies": False, "reason": reason, "confidence": "high"}
+
+    # Multi-file indicators
+    wide_scope_words = {"refactor", "rewrite", "restructure", "rearchitect", "migrate"}
+    if wide_scope_words & set(tokens):
+        return {"applies": False, "reason": "wide-scope task", "confidence": "high"}
+
+    # Context-based heuristics
+    if context_path:
+        try:
+            with open(context_path) as f:
+                ctx = json.load(f)
+            summary = ctx.get("summary", {})
+            if len(summary.get("test_files", [])) > 30:
+                return {"applies": False, "reason": "many test files indicate complexity", "confidence": "medium"}
+        except Exception as e:
+            # Log context error instead of silently ignoring
+            sys.stderr.write(f"[strategy_selector] context load warning: {e}\n")
+
+    return {"applies": True, "reason": "clear objective, low risk, narrow scope", "confidence": "high"}
+
+
+# ── Strategy selection ───────────────────────────────────────────
+
+def select_strategy(task, context_path=None):
+    """Select strategy with normalized classification and confidence.
+
+    Returns dict with strategy, agents, complexity, risk, confidence,
+    reason, signals_used, and fallback status.
+    """
+    tokens = tokenize(task.lower())
     best_strategy = None
-    best_priority = -1
+    best_score = 0
     best_reason = "No specific strategy matched."
+    signals_used = []
 
-    for rule in STRATEGY_RULES:
-        matched = False
+    for strategy_name, defn in STRATEGY_DEFS.items():
+        score = 0
         reasons = []
 
-        # Keyword matching
-        if rule.get("keywords"):
-            matched_kw = [kw for kw in rule["keywords"] if kw.lower() in task_lower]
-            if matched_kw:
-                matched = True
-                reasons.append(f"keywords: {', '.join(matched_kw)}")
+        # Phase 1: Exact phrase matches (highest signal)
+        exact_phrases = defn.get("exact_phrases", [])
+        phrase_match = match_exact_phrases(tokens, exact_phrases)
+        if phrase_match:
+            score += 50
+            reasons.append(f"exact phrase: '{phrase_match}'")
 
-        # Context signals
-        if args.context:
+        # Phase 2: Single word matches (moderate signal per word)
+        single_words = defn.get("single_words", [])
+        word_matches = match_single_words(tokens, single_words)
+        if word_matches:
+            word_score = 20 * len(word_matches)  # 20 per word so 2+ words cross fast-path threshold
+            score += word_score
+            reasons.append(f"words: {', '.join(word_matches)}")
+
+        # Phase 3: Context signals
+        signals = defn.get("signals", {})
+        if context_path and signals:
             try:
-                with open(args.context) as f:
+                with open(context_path) as f:
                     ctx = json.load(f)
-                signals = ctx.get("summary", {})
-                if "test_files" in rule.get("context_signals", []) and signals.get("test_files"):
-                    matched = True
+                if signals.get("test_files") and ctx.get("summary", {}).get("test_files"):
+                    score += 5
                     reasons.append("has test files")
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"[strategy_selector] context load warning: {e}\n")
 
-        # Domain requirement
-        if rule.get("requires_both_domains") and not has_both_domains(task_lower):
-            matched = False
+        # Phase 4: Domain requirements
+        if defn.get("requires_both_domains"):
+            if not has_both_domains(tokens):
+                continue  # Skip — domain requirement not met
+            else:
+                score += 30  # Bonus for confirmed multi-domain task
+                reasons.append("both domains detected")
 
-        if matched and rule["priority"] >= best_priority:
-            best_strategy = rule["strategy"]
-            best_priority = rule["priority"]
+        if score > best_score:
+            best_strategy = strategy_name
+            best_score = score
             best_reason = "; ".join(reasons) if reasons else "rule matched by default"
 
-    # Fallback to direct_single_agent
+    # Fallback
     if best_strategy is None:
         best_strategy = "direct_single_agent"
-        best_priority = 0
-        best_reason = "Fallback: no strategy matched"
+        best_score = 0
+        best_reason = "Fallback: direct execution (no delegation condition matched)"
+        signals_used.append("fallback")
 
-    # Apply fast path check
-    fast_path = check_fast_path(task_lower, args.context)
-    if fast_path["applies"] and best_priority <= 5:
-        # Fast path only overrides low-priority strategies
+    # Fast path override (only when no specific strategy matched at all)
+    fast_path = check_fast_path(task, context_path)
+    if fast_path["applies"] and best_score == 0:
         best_strategy = "fast_direct"
         best_reason = f"Fast path: {fast_path['reason']}"
-
-    agents = STRATEGY_AGENTS.get(best_strategy, ["heidi"])
-    parallel = STRATEGY_PARALLEL.get(best_strategy, False)
-    complexity = STRATEGY_COMPLEXITY.get(best_strategy, "medium")
-    risk = STRATEGY_RISK.get(best_strategy, "medium")
-    requires_scout = STRATEGY_REQUIRES_SCOUT.get(best_strategy, False)
-    requires_auditor = STRATEGY_REQUIRES_AUDITOR.get(best_strategy, False)
+        best_score = 0
 
     # Confidence heuristic
-    if best_priority >= 9:
+    if best_score >= 50:
         confidence = "high"
-    elif best_priority >= 5:
+    elif best_score >= 10:
         confidence = "medium"
+    elif fast_path.get("confidence") == "high":
+        confidence = "high"
     else:
         confidence = "low"
 
-    result = {
+    complexity = STRATEGY_COMPLEXITY.get(best_strategy, "medium")
+    risk = STRATEGY_RISK.get(best_strategy, "medium")
+    agents = STRATEGY_DEFS[best_strategy]["agents"]
+    parallel = STRATEGY_PARALLEL.get(best_strategy, False)
+
+    return {
         "strategy": best_strategy,
         "complexity": complexity,
         "risk": risk,
         "confidence": confidence,
         "agents": agents,
         "parallelizable": parallel,
-        "requires_scout": requires_scout,
-        "requires_auditor": requires_auditor,
         "fast_path": best_strategy == "fast_direct",
         "reason": best_reason,
+        "score": best_score,
+        "fallback": best_strategy == "direct_single_agent",
         "verification_gates": _verification_gates(best_strategy),
     }
-    print(json.dumps(result, indent=2, sort_keys=True))
 
 
 def _verification_gates(strategy):
-    """Return verification gates appropriate for the strategy."""
     gates = {
         "fast_direct": ["targeted test"],
         "direct_single_agent": ["targeted test", "lint/typecheck"],
@@ -239,81 +349,19 @@ def _verification_gates(strategy):
         "planner_gate": ["plan approved", "implementation review"],
         "audit_only": ["audit report", "no unauthorized changes"],
         "audit_after_change": ["change audit", "security review", "regression test"],
-        "prompt_improvement_proposal": ["proposal validated", "benchmark comparison"],
+        "scout_only": ["scout report"],
     }
     return gates.get(strategy, ["targeted test", "lint/typecheck"])
 
 
-def check_fast_path(task, context_path=None):
-    """Check whether fast_direct strategy applies.
+# ── CLI ──────────────────────────────────────────────────────────
 
-    Fast path rules: ALL must be true:
-      - One clear objective (single sentence-ish task)
-      - Low risk (no auth/permission/deployment keywords)
-      - Likely 1-2 files (no "refactor", "architecture", "migration")
-      - No database/auth/deployment changes
-      - No architecture decision
-      - No failing CI reference
-      - No user-requested audit
-      - No conflicting ownership
-    """
-    task_lower = task.lower()
-
-    # High-risk keywords that disqualify fast path
-    disqualifiers = {
-        "auth": "auth-related change",
-        "authentication": "authentication change",
-        "permission": "permission change",
-        "database": "database change",
-        "migration": "schema migration",
-        "deployment": "deployment-related",
-        "deploy": "deployment-related",
-        "production": "production change",
-        "architecture": "architecture decision",
-        "architect": "architecture decision",
-        "refactor": "multi-file refactor",
-        "rewrite": "multi-file rewrite",
-        "ci": "CI change",
-        "pipeline": "pipeline change",
-        "audit": "audit requested",
-        "review": "review requested",
-        "security": "security change",
-        "encrypt": "security change",
-        "decrypt": "security change",
-        "infrastructure": "infrastructure change",
-        "config": "config change",
-        "plugin": "plugin system change",
-        "orchestrat": "orchestration change",
-    }
-
-    reasons = []
-    for kw, reason in disqualifiers.items():
-        if kw in task_lower:
-            reasons.append(reason)
-
-    if reasons:
-        return {"applies": False, "reason": "; ".join(reasons)}
-
-    # Context-based checks
-    if context_path:
-        try:
-            with open(context_path) as f:
-                ctx = json.load(f)
-            summary = ctx.get("summary", {})
-            # If > 20 test files, might be complex
-            if len(summary.get("test_files", [])) > 20:
-                return {"applies": False, "reason": "many test files (>20) indicate complexity"}
-            # If > 50 config files, likely not fast
-            if len(summary.get("config_files", [])) > 50:
-                return {"applies": False, "reason": "many config files indicate complexity"}
-        except Exception:
-            pass
-
-    return {"applies": True, "reason": "one clear objective, low risk, likely 1-2 files"}
+def cmd_select(args):
+    result = select_strategy(args.task, args.context)
+    print(json.dumps(result, indent=2, sort_keys=True))
 
 
 def cmd_fast_path_check(args):
-    """Check if fast_path applies for a given task."""
     result = check_fast_path(args.task, args.context)
     result["task"] = args.task[:100]
     print(json.dumps(result, indent=2, sort_keys=True))

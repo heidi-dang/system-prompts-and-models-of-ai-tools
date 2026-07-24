@@ -42,7 +42,10 @@ class TestStrategySelector(unittest.TestCase):
         self.assert_strategy("Audit the security of auth module", "audit_only")
 
     def test_prompt_change_proposal(self):
-        self.assert_strategy("Improve heidi agent prompt for better delegation", "prompt_improvement_proposal")
+        # "prompt improvement" no longer has a dedicated strategy — it's a direct task
+        rc, out, _ = run("select", "--task", "Improve heidi agent prompt for better delegation")
+        result = json.loads(out)
+        self.assertIn(result["strategy"], ["direct_single_agent", "fast_direct"])
 
     def test_simple_typo_direct(self):
         # "Fix typo" may match fast_direct or direct_single_agent

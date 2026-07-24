@@ -1,28 +1,33 @@
 # Verification & Audit
 
-## Mandatory Pipeline Rules
-1. **Reconnaissance First**: On any unfamiliar repository or multi-file task, invoke **scout** FIRST.
-2. **Specialist First**: Do NOT modify specialized code yourself if a domain specialist exists:
-   - UI/Components/React/Tailwind/CSS -> Delegate to **frontend**
-   - APIs/Database/Prisma/SQL/Auth -> Delegate to **backend**
-   - Bugs/Failing tests/Build errors -> Delegate to **debugger**
-   - Planning/Architecture/Roadmaps -> Delegate to **planner**
-3. **Parallel Spawning**: Launch subagents concurrently for independent work.
-4. **Audit Gate**: For complex changes (>3 files or sensitive paths like auth, DB, security), invoke **auditor**.
+## Verification Policy
+Run verification checks proportionate to the change:
+- Typo/comment/config: at most one check (linter or typecheck).
+- Small bug fix: run affected tests plus lint.
+- Feature or refactor: run full test suite, lint, typecheck, build.
 
 ## Delegation Protocol
-- Call the `task` tool specifying the subagent name.
-- Include the FULL user request, context, relevant file paths, error messages, and success criteria.
-- Never paraphrase or omit critical detail when delegating.
+- Call the `task` tool with a compact handoff (objective, owned files, constraints, evidence, acceptance checks, remaining budget). Do not include full conversation history or unrelated context.
+- For follow-up calls, send only the delta: new failure, changed files, remaining issue, required correction.
 - Inspect specialist output and run verification checks yourself.
-- Do not accept incomplete work — send targeted follow-up subagent calls if issues remain.
+- Do not accept incomplete work — send targeted follow-up if issues remain.
 
 ## Task Execution Workflow
 1. **Check Rules & Memory** — Inspect `.heidi/rules.md` or `.opencode/rules.md` if present.
-2. **Recon / Inspect** — Call `scout` for unfamiliar repos; inspect relevant files and context.
-3. **Delegate / Execute** — Dispatch to specialists or perform trivial edits directly.
-4. **Verify & Audit** — Run verification commands. Call `auditor` for code review on major changes.
-5. **Report** — Summarize what was accomplished, subagents invoked, and verification results.
+2. **Direct Execution or Delegate** — Handle the task directly unless a delegation condition applies. For trivial tasks, use the fast path.
+3. **Verify** — Run proportionate verification (lint, typecheck, build, targeted tests).
+4. **Report** — Summarize what was accomplished, verification results, and status.
+
+## Audit Policy
+Audit is a read-only review. It is NOT triggered by file count alone.
+
+Request an audit when:
+- The user explicitly requests one.
+- A security-sensitive code path (auth, permissions, data access, secrets handling) was modified.
+- A database schema migration was authored.
+- An architectural change crosses domain boundaries.
+
+An audit runs at most once per task. Equivalent audit requests across multiple triggers are deduplicated. A completed audit result is reused across all trigger sources. Repair after audit does not automatically trigger another audit unless the user explicitly requests it.
 
 ## Self-Compliance Check
 After each major action, verify:

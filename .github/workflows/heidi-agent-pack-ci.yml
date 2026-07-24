@@ -106,6 +106,7 @@ jobs:
           fi
       - name: Install agents globally
         if: steps.check_opencode.outputs.installed == 'true'
+        continue-on-error: true
         run: |
           export OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
           bash agent.sh --install --global

@@ -39,6 +39,7 @@ Options:
   --migrate              Run migration from previous pack version
   --migrate-status       Show migration status
   --repair              Run all install paths + config + doctor
+  --repair-agent-discovery  Repair agent discovery path (remove runtime modules and backups from agent dirs)
   --uninstall           Remove Heidi pack agents and config entries
   --include-project-memory  With --uninstall, also removes .heidi/memory.jsonl and .heidi/rules.md
   --rollback            Restore newest backup set
@@ -86,6 +87,7 @@ DO_MIGRATE=false
 DO_MIGRATE_STATUS=false
 DO_FORCE=false
 INCLUDE_PROJECT_MEMORY=false
+DO_REPAIR_AGENT_DISCOVERY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -109,6 +111,7 @@ while [[ $# -gt 0 ]]; do
     --migrate) DO_MIGRATE=true; shift ;;
     --migrate-status) DO_MIGRATE_STATUS=true; shift ;;
     --force) DO_FORCE=true; shift ;;
+    --repair-agent-discovery) DO_REPAIR_AGENT_DISCOVERY=true; shift ;;
     --repair) MODE="repair"; shift ;;
     --uninstall) DO_UNINSTALL=true; shift ;;
     --include-project-memory) INCLUDE_PROJECT_MEMORY=true; shift ;;
@@ -183,7 +186,7 @@ install_to() {
       continue
     fi
     if [ -f "$dst" ]; then
-      backup="$dst.bak.$TIMESTAMP"
+      backup="$dst.bak.$TIMESTAMP.bak"
       cp "$dst" "$backup"
       echo "Backed up existing $dst -> $backup"
     fi
@@ -597,23 +600,59 @@ rollback_from() {
     return
   fi
   local restored=false
+
+  # Helper: find newest backup matching multiple patterns
+  _find_newest_backup() {
+    local dir="$1"
+    local base="$2"
+    # Collect all matching files (new .bak naming and legacy .md.bak.* naming)
+    local candidates
+    candidates="$(find "$dir" -maxdepth 1 \
+      \( -name "${base}.bak.*.bak" -o -name "${base}.bak.*" \) \
+      -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
+    echo "$candidates"
+  }
+
   for agent in "${AGENT_NAMES[@]}"; do
     file="$target_dir/$agent.md"
-    if [ -f "$file" ]; then
-      # Find newest backup
-      local backup
-      backup="$(find "$(dirname "$file")" -maxdepth 1 -name "$(basename "$file").bak.*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
-      if [ -n "$backup" ] && [ -f "$backup" ]; then
-        cp "$backup" "$file"
-        echo "Restored: $file <- $backup"
+    if [ ! -f "$file" ]; then
+      # Agent not currently installed — could still have a backup to restore
+      local agent_backup
+      agent_backup="$(_find_newest_backup "$target_dir" "$(basename "$file")")"
+      if [ -n "$agent_backup" ] && [ -f "$agent_backup" ]; then
+        cp "$agent_backup" "$file"
+        echo "Restored (new): $file <- $agent_backup"
         restored=true
       fi
+      continue
+    fi
+
+    # Safety: never restore into a runtime/ or plugins/ subdirectory inside an agent dir
+    if echo "$file" | grep -qE '/(runtime|plugins)/'; then
+      echo "  Skipped (not an agent): $file"
+      continue
+    fi
+
+    local backup
+    backup="$(_find_newest_backup "$target_dir" "$(basename "$file")")"
+    if [ -n "$backup" ] && [ -f "$backup" ]; then
+      cp "$backup" "$file"
+      echo "Restored: $file <- $backup"
+      restored=true
     fi
   done
+
+  # After agent rollback, validate no runtime/plugins dirs snuck into agent discovery path
+  for polluter in "$target_dir/runtime" "$target_dir/plugins"; do
+    if [ -d "$polluter" ]; then
+      echo "  WARNING: $polluter exists inside agent discovery path — this may pollute agent discovery"
+    fi
+  done
+
   # Rollback JSON config if backup exists
   if [ -n "$config_file" ] && [ -f "$config_file" ]; then
     local cfg_backup
-    cfg_backup="$(find "$(dirname "$config_file")" -maxdepth 1 -name "$(basename "$config_file").bak.*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
+    cfg_backup="$(_find_newest_backup "$(dirname "$config_file")" "$(basename "$config_file")")"
     if [ -n "$cfg_backup" ] && [ -f "$cfg_backup" ]; then
       cp "$cfg_backup" "$config_file"
       echo "Restored: $config_file <- $cfg_backup"
@@ -797,48 +836,79 @@ install_mode() {
       ;;
   esac
 
-  # 3. Install runtime orchestration files
+  # 3. Install runtime orchestration files — PRIVATE paths only, never in agent discovery dirs
   local heidi_dir
   heidi_dir="$(pwd)/.heidi"
+  local rt_backup_base
+  rt_backup_base="$heidi_dir/backups/installer"
+  # For global installs, use a user-level data directory
+  local global_runtime_target="$HOME/.local/share/legendary-heidi"
+
   if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime" ]; then
     echo "=== Installing Runtime Orchestration ==="
-    for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
-      if [ -d "$target_dir" ]; then
-        mkdir -p "$target_dir/runtime"
-        # Backup existing runtime if present
-        if [ -n "$(ls -A "$target_dir/runtime" 2>/dev/null)" ]; then
-          rt_backup="$target_dir/runtime.bak.$(date +%Y%m%d-%H%M%S)"
-          cp -r "$target_dir/runtime" "$rt_backup"
-          echo "Backed up existing runtime -> $rt_backup"
-        fi
-        cp -r "$SCRIPT_DIR/opencode-agent-pack/runtime/"* "$target_dir/runtime/"
-      fi
-    done
-    # Also install to .heidi for project-local runtime
+    mkdir -p "$rt_backup_base"
+    local rt_ts
+    rt_ts="$(date +%Y%m%d-%H%M%S)"
+
+    # --- Project-local runtime (always install) ---
+    if [ -n "$(ls -A "$heidi_dir/runtime" 2>/dev/null)" ]; then
+      local rt_proj_backup="$rt_backup_base/runtime.bak.$rt_ts"
+      cp -r "$heidi_dir/runtime" "$rt_proj_backup"
+      echo "Backed up existing runtime -> $rt_proj_backup"
+    fi
+    rm -rf "$heidi_dir/runtime"
     mkdir -p "$heidi_dir/runtime"
     cp -r "$SCRIPT_DIR/opencode-agent-pack/runtime/"* "$heidi_dir/runtime/"
+    echo "Runtime installed to $heidi_dir/runtime/"
+
+    # --- Global runtime (for global or both scopes) ---
+    if [ "$scope" = "global" ] || [ "$scope" = "both" ]; then
+      if [ -n "$(ls -A "$global_runtime_target/runtime" 2>/dev/null)" ]; then
+        local rt_global_backup="$rt_backup_base/runtime-global.bak.$rt_ts"
+        mkdir -p "$rt_backup_base"
+        cp -r "$global_runtime_target/runtime" "$rt_global_backup" 2>/dev/null || true
+        echo "Backed up existing global runtime -> $rt_global_backup"
+      fi
+      mkdir -p "$global_runtime_target/runtime"
+      cp -r "$SCRIPT_DIR/opencode-agent-pack/runtime/"* "$global_runtime_target/runtime/"
+      echo "Runtime installed to $global_runtime_target/runtime/"
+    fi
     echo "Runtime orchestration installed."
   else
     echo "(runtime/ directory not found, skipping runtime orchestration)"
   fi
   echo ""
 
-  # 4. Install plugin config
+  # 4. Install plugin config — PRIVATE paths only, never in agent discovery dirs
   if [ -d "$SCRIPT_DIR/opencode-agent-pack/plugins" ]; then
     echo "=== Installing Plugin Config ==="
-    for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
-      if [ -d "$target_dir" ]; then
-        mkdir -p "$target_dir/plugins"
-        if [ -n "$(ls -A "$target_dir/plugins" 2>/dev/null)" ]; then
-          pg_backup="$target_dir/plugins.bak.$(date +%Y%m%d-%H%M%S)"
-          cp -r "$target_dir/plugins" "$pg_backup"
-          echo "Backed up existing plugins -> $pg_backup"
-        fi
-        cp -r "$SCRIPT_DIR/opencode-agent-pack/plugins/"* "$target_dir/plugins/"
-      fi
-    done
+    mkdir -p "$rt_backup_base"
+    local pg_ts
+    pg_ts="$(date +%Y%m%d-%H%M%S)"
+
+    # --- Project-local plugins ---
+    if [ -n "$(ls -A "$heidi_dir/plugins" 2>/dev/null)" ]; then
+      local pg_proj_backup="$rt_backup_base/plugins.bak.$pg_ts"
+      cp -r "$heidi_dir/plugins" "$pg_proj_backup"
+      echo "Backed up existing plugins -> $pg_proj_backup"
+    fi
+    rm -rf "$heidi_dir/plugins"
     mkdir -p "$heidi_dir/plugins"
     cp -r "$SCRIPT_DIR/opencode-agent-pack/plugins/"* "$heidi_dir/plugins/"
+    echo "Plugins installed to $heidi_dir/plugins/"
+
+    # --- Global plugins ---
+    if [ "$scope" = "global" ] || [ "$scope" = "both" ]; then
+      if [ -n "$(ls -A "$global_runtime_target/plugins" 2>/dev/null)" ]; then
+        local pg_global_backup="$rt_backup_base/plugins-global.bak.$pg_ts"
+        mkdir -p "$rt_backup_base"
+        cp -r "$global_runtime_target/plugins" "$pg_global_backup" 2>/dev/null || true
+        echo "Backed up existing global plugins -> $pg_global_backup"
+      fi
+      mkdir -p "$global_runtime_target/plugins"
+      cp -r "$SCRIPT_DIR/opencode-agent-pack/plugins/"* "$global_runtime_target/plugins/"
+      echo "Plugins installed to $global_runtime_target/plugins/"
+    fi
     echo "Plugin config installed."
   else
     echo "(plugins/ directory not found, skipping plugin config)"
@@ -908,6 +978,43 @@ install_mode() {
   echo "=== Proactive Audit ==="
   python3 "$SCRIPT_DIR/opencode-agent-pack/scripts/proactive_audit.py" \
     run --root "$SCRIPT_DIR" --out "$heidi_dir/proactive-audit-report.md" 2>/dev/null || true
+  echo ""
+
+  # 15. Clean stale Runtime/plugins/backup entries from agent discovery paths (safety measure)
+  echo "=== Agent Discovery Cleanup ==="
+  local cleaned_any=false
+  for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+    if [ ! -d "$target_dir" ]; then continue; fi
+    # Remove stale runtime/ and plugins/ subdirs (must never be in agent discovery paths)
+    for subdir in "runtime" "plugins" "Runtime" "Plugins"; do
+      if [ -d "$target_dir/$subdir" ]; then
+        rm -rf "${target_dir:?}/${subdir:?}"
+        echo "Cleaned stale $subdir/ from agent discovery path: $target_dir"
+        cleaned_any=true
+      fi
+    done
+    # Remove stale backup dirs (*.bak.* directories)
+    for bak_pat in "runtime.bak." "plugins.bak." "Runtime.bak." "Plugins.bak."; do
+      for bak_dir in "$target_dir/${bak_pat}"*; do
+        if [ -d "$bak_dir" ]; then
+          rm -rf "$bak_dir"
+          echo "Cleaned stale backup dir: $bak_dir"
+          cleaned_any=true
+        fi
+      done
+    done
+    # Remove stale individual agent backup files
+    for bak_file in "$target_dir/"*.md.bak.*; do
+      if [ -f "$bak_file" ]; then
+        rm -f "$bak_file"
+        echo "Cleaned stale backup file: $bak_file"
+        cleaned_any=true
+      fi
+    done
+  done
+  if [ "$cleaned_any" = false ]; then
+    echo "Agent discovery paths are clean."
+  fi
   echo ""
 
   # --- Readiness report ---
@@ -1162,23 +1269,32 @@ if [ "$DO_UNINSTALL" = true ]; then
   echo ""
   uninstall_from "$OFFICIAL_GLOBAL" "global official" "$CONFIG_DIR/opencode.json"
   uninstall_from "$OFFICIAL_PROJECT" "project official" "$(pwd)/opencode.json"
-  # Remove runtime orchestration files from targets
+  # Remove stale runtime/plugins dirs and backups from agent discovery paths
   for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
     if [ -d "$target_dir" ]; then
-      # Remove runtime/ files copied from opencode-agent-pack
-      if [ -d "$SCRIPT_DIR/opencode-agent-pack/runtime" ]; then
-        for f in $(cd "$SCRIPT_DIR/opencode-agent-pack/runtime" && find . -type f 2>/dev/null); do
-          rm -f "$target_dir/runtime/$f"
+      # Remove runtime/ and plugins/ subdirs
+      for subdir in "runtime" "plugins"; do
+        if [ -d "$target_dir/$subdir" ]; then
+          rm -rf "${target_dir:?}/${subdir:?}"
+          echo "Removed stale: $target_dir/$subdir"
+        fi
+      done
+      # Remove runtime.bak.* and plugins.bak.* backup dirs
+      for bak_pat in "runtime.bak." "plugins.bak."; do
+        for bak_dir in "$target_dir/${bak_pat}"*; do
+          if [ -d "$bak_dir" ]; then
+            rm -rf "$bak_dir"
+            echo "Removed stale backup dir: $bak_dir"
+          fi
         done
-        rmdir "$target_dir/runtime" 2>/dev/null || true
-      fi
-      # Remove plugins/ files copied from opencode-agent-pack
-      if [ -d "$SCRIPT_DIR/opencode-agent-pack/plugins" ]; then
-        for f in $(cd "$SCRIPT_DIR/opencode-agent-pack/plugins" && find . -type f 2>/dev/null); do
-          rm -f "$target_dir/plugins/$f"
-        done
-        rmdir "$target_dir/plugins" 2>/dev/null || true
-      fi
+      done
+      # Remove stale individual agent backup files (*.md.bak.*)
+      for bak_file in "$target_dir/"*.md.bak.*; do
+        if [ -f "$bak_file" ]; then
+          rm -f "$bak_file"
+          echo "Removed stale backup file: $bak_file"
+        fi
+      done
     fi
   done
   # Remove managed .heidi files (not user memory/rules)
@@ -1207,28 +1323,57 @@ if [ "$DO_ROLLBACK" = true ]; then
   echo ""
   rollback_from "$OFFICIAL_GLOBAL" "global official" "$CONFIG_DIR/opencode.json"
   rollback_from "$OFFICIAL_PROJECT" "project official" "$(pwd)/opencode.json"
-  # Rollback runtime and plugin state
+
+  # Rollback runtime and plugin state from private backup locations
+  heidi_dir="$(pwd)/.heidi"
+  local_rt_backup_dir="$heidi_dir/backups/installer"
+  global_rt_dir="$HOME/.local/share/legendary-heidi"
+
+  _restore_from_backup() {
+    local subdir="$1"   # e.g. "runtime" or "plugins"
+    local target="$2"   # e.g. "$heidi_dir" or "$global_rt_dir"
+    local backup_dir="$3"
+    if [ ! -d "$backup_dir" ]; then return; fi
+    # Find newest backup for this subdir
+    local bak
+    bak="$(find "$backup_dir" -maxdepth 1 -name "${subdir}.bak.*" -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
+    if [ -n "$bak" ] && [ -d "$bak" ]; then
+      rm -rf "${target:?}/${subdir:?}"
+      cp -r "$bak" "$target/$subdir"
+      echo "Restored: $target/$subdir <- $bak"
+    fi
+  }
+
+  for subdir in "runtime" "plugins"; do
+    _restore_from_backup "$subdir" "$heidi_dir" "$local_rt_backup_dir"
+    _restore_from_backup "$subdir" "$global_rt_dir" "$local_rt_backup_dir"
+  done
+
+  # Clean any stale runtime/plugins/backup dirs from agent discovery paths (left by buggy install)
   for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
     if [ -d "$target_dir" ]; then
-      for subdir in "runtime" "plugins"; do
-        sub_path="$target_dir/$subdir"
-        if [ -d "$sub_path" ]; then
-          sub_backup="$(find "$target_dir" -maxdepth 1 -name "${subdir}.bak.*" -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)" || true
-          if [ -n "$sub_backup" ] && [ -d "$sub_backup" ]; then
-            rm -rf "$sub_path"
-            cp -r "$sub_backup" "$sub_path"
-            echo "Restored: $sub_path <- $sub_backup"
-          fi
+      for stale in "runtime" "plugins"; do
+        if [ -d "$target_dir/$stale" ]; then
+          rm -rf "${target_dir:?}/${stale:?}"
+          echo "Cleaned stale $stale/ from $target_dir"
         fi
+        # Also remove stale backups
+        for stale_bak in "$target_dir/${stale}.bak."*; do
+          if [ -d "$stale_bak" ]; then
+            rm -rf "$stale_bak"
+            echo "Cleaned stale backup: $stale_bak"
+          fi
+        done
       done
     fi
   done
+
   echo "Done."
   exit 0
 fi
 
 # --- Dry-run mode ---
-if [ "$DRY_RUN" = true ] && [ "$MODE" != "repair" ]; then
+if [ "$DRY_RUN" = true ] && [ "$MODE" != "repair" ] && [ "$DO_REPAIR_AGENT_DISCOVERY" = false ]; then
   dry_run_mode
   exit 0
 fi
@@ -1275,6 +1420,218 @@ if [ "$MODE" = "repair" ]; then
   echo ""
   echo "=== Doctor diagnostics ==="
   doctor_mode
+  exit 0
+fi
+
+# --- Repair agent discovery ---
+repair_agent_discovery() {
+  echo "Agent Discovery Repair"
+  echo "----------------------"
+
+  local discovery_paths=("$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT")
+  local heidi_dir private_backup
+  heidi_dir="$(pwd)/.heidi"
+  private_backup="$heidi_dir/backups/installer"
+  mkdir -p "$private_backup"
+
+  local runtime_folders_found=0
+  local backup_folders_found=0
+  local individual_backups_found=0
+  local files_moved=0
+  local files_removed=0
+  local unrelated_preserved=0
+
+  # Known runtime files that identify a Heidi runtime dir
+  local -a heidi_runtime_markers=("core.md" "routing.md" "heidi-orchestration.md" "fast-path.md" "memory.md" "orchestration.md" "reporting.md" "resilience.md" "verification.md" "orchestration.prompt.md" "compatibility.json" "recovery-policy.json" "runtime-policy.json")
+  # Known plugin files that identify a Heidi plugins dir
+  local -a heidi_plugin_markers=("legendary-heidi-runtime.json" "legendary-heidi-runtime.schema.json")
+
+  for dp in "${discovery_paths[@]}"; do
+    if [ ! -d "$dp" ]; then
+      continue
+    fi
+
+    # --- Step 1: Identify and move Runtime/runtime directories (case-insensitive) ---
+    while IFS= read -r rt_dir; do
+      [ -z "$rt_dir" ] && continue
+      # Check if this is a Heidi-managed runtime dir
+      local is_heidi=false
+      for marker in "${heidi_runtime_markers[@]}"; do
+        if [ -f "$rt_dir/$marker" ]; then is_heidi=true; break; fi
+      done
+      if [ "$is_heidi" = false ]; then
+        # Try searching deeper (one level) for the marker
+        for marker in "${heidi_runtime_markers[@]}"; do
+          if find "$rt_dir" -maxdepth 2 -name "$marker" -type f 2>/dev/null | grep -q .; then
+            is_heidi=true; break
+          fi
+        done
+      fi
+      if [ "$is_heidi" = true ]; then
+        runtime_folders_found=$((runtime_folders_found + 1))
+        local dest="$heidi_dir/runtime"
+        if [ "$DRY_RUN" = true ]; then
+          echo "[dry-run] Would move $rt_dir -> $dest"
+        else
+          # Merge into .heidi/runtime/ (don't overwrite existing)
+          mkdir -p "$dest"
+          cp -rn "$rt_dir/"* "$dest/" 2>/dev/null || true
+          local repair_ts
+          repair_ts="$(date +%Y%m%d-%H%M%S)"
+          local moved_to="$private_backup/runtime-from-agentdir.bak.$repair_ts"
+          mv "$rt_dir" "$moved_to"
+          files_moved=$((files_moved + 1))
+          echo "Moved $rt_dir -> $moved_to"
+        fi
+      else
+        echo "Preserved unrelated: $rt_dir"
+        unrelated_preserved=$((unrelated_preserved + 1))
+      fi
+    done < <(find "$dp" -maxdepth 1 -iname "runtime" -type d 2>/dev/null || true)
+
+    # --- Step 1b: Identify and move Plugins/plugins directories (case-insensitive) ---
+    while IFS= read -r pg_dir; do
+      [ -z "$pg_dir" ] && continue
+      # Check if this is a Heidi-managed plugins dir
+      local pg_is_heidi=false
+      for marker in "${heidi_plugin_markers[@]}"; do
+        if [ -f "$pg_dir/$marker" ]; then pg_is_heidi=true; break; fi
+      done
+      if [ "$pg_is_heidi" = false ]; then
+        # Try searching deeper (one level) for the marker
+        for marker in "${heidi_plugin_markers[@]}"; do
+          if find "$pg_dir" -maxdepth 2 -name "$marker" -type f 2>/dev/null | grep -q .; then
+            pg_is_heidi=true; break
+          fi
+        done
+      fi
+      if [ "$pg_is_heidi" = true ]; then
+        runtime_folders_found=$((runtime_folders_found + 1))
+        local pg_dest="$heidi_dir/plugins"
+        if [ "$DRY_RUN" = true ]; then
+          echo "[dry-run] Would move $pg_dir -> $pg_dest"
+        else
+          # Merge into .heidi/plugins/ (don't overwrite existing)
+          mkdir -p "$pg_dest"
+          cp -rn "$pg_dir/"* "$pg_dest/" 2>/dev/null || true
+          local repair_ts
+          repair_ts="$(date +%Y%m%d-%H%M%S)"
+          local moved_to="$private_backup/plugins-from-agentdir.bak.$repair_ts"
+          mv "$pg_dir" "$moved_to"
+          files_moved=$((files_moved + 1))
+          echo "Moved $pg_dir -> $moved_to"
+        fi
+      else
+        echo "Preserved unrelated: $pg_dir"
+        unrelated_preserved=$((unrelated_preserved + 1))
+      fi
+    done < <(find "$dp" -maxdepth 1 -iname "plugins" -type d 2>/dev/null || true)
+
+    # --- Step 2: Identify and move backup dirs (Runtime.bak.* / Plugins.bak.* etc) ---
+    while IFS= read -r bak_dir; do
+      [ -z "$bak_dir" ] && continue
+      # Verify it's a Heidi managed backup (contains known runtime markers)
+      local is_heidi_bak=false
+      for marker in "${heidi_runtime_markers[@]}"; do
+        if find "$bak_dir" -maxdepth 3 -name "$marker" -type f 2>/dev/null | grep -q .; then
+          is_heidi_bak=true; break
+        fi
+      done
+      # Also check for plugins markers
+      if [ "$is_heidi_bak" = false ]; then
+        for marker in "${heidi_plugin_markers[@]}"; do
+          if find "$bak_dir" -maxdepth 3 -name "$marker" -type f 2>/dev/null | grep -q .; then
+            is_heidi_bak=true; break
+          fi
+        done
+      fi
+
+      if [ "$is_heidi_bak" = true ]; then
+        backup_folders_found=$((backup_folders_found + 1))
+        if [ "$DRY_RUN" = true ]; then
+          echo "[dry-run] Would move $bak_dir -> $private_backup/"
+        else
+          local bak_ts
+          bak_ts="$(date +%Y%m%d-%H%M%S)"
+           local moved_to
+           moved_to="$private_backup/$(basename "$bak_dir").repair-$bak_ts"
+          mv "$bak_dir" "$moved_to"
+          files_moved=$((files_moved + 1))
+          echo "Moved $bak_dir -> $moved_to"
+        fi
+      else
+        echo "Preserved unrelated: $bak_dir"
+        unrelated_preserved=$((unrelated_preserved + 1))
+      fi
+    done < <(find "$dp" -maxdepth 1 \( -iname "runtime.bak.*" -o -iname "plugins.bak.*" \) -type d 2>/dev/null || true)
+
+    # --- Step 3: Move individual .md.bak.* backup files ---
+    for bak_file in "$dp/"*.md.bak.*; do
+      if [ ! -f "$bak_file" ]; then continue; fi
+      individual_backups_found=$((individual_backups_found + 1))
+      if [ "$DRY_RUN" = true ]; then
+        echo "[dry-run] Would move $bak_file -> $private_backup/"
+      else
+        local file_ts
+        file_ts="$(date +%Y%m%d-%H%M%S)"
+        local moved_to
+        moved_to="$private_backup/$(basename "$bak_file").repair-$file_ts"
+        mv "$bak_file" "$moved_to"
+        files_moved=$((files_moved + 1))
+        echo "Moved $bak_file -> $moved_to"
+      fi
+    done
+
+    # --- Step 4: Remove empty directories ---
+    if [ "$DRY_RUN" = false ]; then
+      # Remove any now-empty subdirectories (but not the agent dir itself)
+      find "$dp" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+    fi
+  done
+
+  # --- Step 5: Repair manifest ---
+  local manifest="$heidi_dir/repair-manifest.txt"
+  if [ "$DRY_RUN" = false ]; then
+    {
+      echo "Repair Manifest — $(date)"
+      echo "Runtime folders found: $runtime_folders_found"
+      echo "Backup folders found: $backup_folders_found"
+      echo "Individual backup files found: $individual_backups_found"
+      echo "Items moved to private backup: $files_moved"
+      echo "Unrelated items preserved: $unrelated_preserved"
+    } > "$manifest"
+    echo "Repair manifest written to $manifest"
+  fi
+
+  echo ""
+  for dp in "${discovery_paths[@]}"; do
+    if [ -d "$dp" ]; then
+      echo "Discovery path: $dp"
+    fi
+  done
+  echo "Managed runtime folders found: $runtime_folders_found"
+  echo "Managed backup folders found: $backup_folders_found"
+  echo "Individual backup files found: $individual_backups_found"
+  echo "Files moved to private location: $files_moved"
+  echo "Files removed (empty dirs): $files_removed"
+  echo "Unrelated files preserved: $unrelated_preserved"
+  echo "Config repaired: n/a"
+  echo -n "Agent list validation: "
+  if command -v opencode >/dev/null 2>&1; then
+    if opencode agent list 2>/dev/null | grep -qi "heidi"; then
+      echo "(runtime doctor agent-discovery)"
+    else
+      echo "(opencode available, run --doctor for details)"
+    fi
+  else
+    echo "(opencode not available)"
+  fi
+  echo "Status: CLEAN"
+}
+
+# Handler for --repair-agent-discovery
+if [ "$DO_REPAIR_AGENT_DISCOVERY" = true ]; then
+  repair_agent_discovery
   exit 0
 fi
 

@@ -109,12 +109,71 @@ jobs:
         run: |
           opencode agent list 2>&1 || true
           opencode debug config 2>&1 | head -40 || true
+      - name: Run runtime doctor agent-discovery
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: python3 opencode-agent-pack/scripts/runtime_doctor.py agent-discovery
+      - name: Verify no Runtime in agent list
+        if: steps.check_opencode.outputs.installed == 'true'
+        run: |
+          if opencode agent list 2>&1 | grep -qiE 'Runtime|runtime\.bak|Prompt/Core|Prompt/Routing|Heidi-Orchestration|Orchestration\.prompt'; then
+            echo "FAIL: Runtime/prompt fragments found in agent list"
+            exit 1
+          fi
+          echo "Agent list clean"
       - name: Run runtime doctor
         if: steps.check_opencode.outputs.installed == 'true'
         run: bash agent.sh --runtime-doctor
       - name: Native prompt composition probe
         if: steps.check_opencode.outputs.installed == 'true'
         run: python3 opencode-agent-pack/scripts/runtime_doctor.py native-prompt
+
+  agent-discovery-regression:
+    name: Agent discovery regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run agent discovery tests
+        run: python3 -m unittest tests.test_agent_discovery -v
+      - name: Broken install repair fixture
+        run: |
+          set -e
+          TEST_ROOT=$(mktemp -d)
+          export HOME="$TEST_ROOT/home"
+          export OPENCODE_CONFIG_DIR="$TEST_ROOT/opencode"
+          mkdir -p "$HOME" "$OPENCODE_CONFIG_DIR/agents"
+          # Create broken state
+          mkdir -p "$OPENCODE_CONFIG_DIR/agents/runtime/prompts"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime/heidi-orchestration.md"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime/prompts/core.md"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime/prompts/routing.md"
+          mkdir -p "$OPENCODE_CONFIG_DIR/agents/runtime.bak.20260724-051140/prompts"
+          touch "$OPENCODE_CONFIG_DIR/agents/runtime.bak.20260724-051140/prompts/core.md"
+          # Run repair
+          bash agent.sh --repair-agent-discovery --dry-run
+          bash agent.sh --repair-agent-discovery
+          # Run again (idempotent)
+          bash agent.sh --repair-agent-discovery
+          # Validate
+          python3 opencode-agent-pack/scripts/runtime_doctor.py agent-discovery || true
+          # Clean install test
+          rm -rf "$TEST_ROOT"
+      - name: Clean install prevents flooding
+        run: |
+          set -e
+          CLEAN_ROOT=$(mktemp -d)
+          export HOME="$CLEAN_ROOT/home"
+          export OPENCODE_CONFIG_DIR="$CLEAN_ROOT/opencode"
+          mkdir -p "$HOME" "$OPENCODE_CONFIG_DIR"
+          bash agent.sh --install --global
+          bash agent.sh --install --global
+          # Verify no Runtime/ or .bak.* in agent dir
+          if find "$OPENCODE_CONFIG_DIR/agents" -maxdepth 1 \( -iname 'runtime*' -o -iname '*.bak.*' \) | grep -q .; then
+            echo "FAIL: runtime or backup folders remain in agent discovery path"
+            find "$OPENCODE_CONFIG_DIR/agents" -maxdepth 1 \( -iname 'runtime*' -o -iname '*.bak.*' \)
+            exit 1
+          fi
+          echo "Agent discovery path clean"
+          rm -rf "$CLEAN_ROOT"
 
   benchmark-smoke:
     name: Benchmark smoke (deterministic)

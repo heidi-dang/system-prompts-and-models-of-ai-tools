@@ -338,6 +338,194 @@ def cmd_discover(args):
 
 
 # ──────────────────────────────────────────────────────────────────
+# agent-discovery command
+# ──────────────────────────────────────────────────────────────────
+
+# The 7 Heidi-managed agents that must be present in discovery paths.
+HEIDI_AGENTS = {"heidi", "scout", "planner", "auditor", "frontend", "backend", "debugger"}
+
+# Native OpenCode agents that ship with the runtime.
+NATIVE_AGENTS = {"build", "plan"}
+
+# Internal runtime prompt fragment names that MUST NOT appear as
+# discovered agent names (they are composition internals, not agents).
+RUNTIME_FRAGMENTS = {
+    "core", "orchestration", "routing", "verification", "resilience",
+    "reporting", "memory", "fast-path", "heidi-orchestration",
+}
+
+
+def _get_opencode_agent_list():
+    """Run 'opencode agent list' and return a set of agent names, or None on failure."""
+    oc_bin = find_opencode_binary()
+    if not oc_bin:
+        return None
+    try:
+        import subprocess as _sp
+        output = _sp.check_output(
+            [oc_bin, "agent", "list"],
+            stderr=_sp.STDOUT,
+            text=True,
+            timeout=15,
+        )
+        names = set()
+        for line in output.strip().splitlines():
+            cleaned = line.strip()
+            # Strip common bullet / tree-drawing characters
+            cleaned = cleaned.lstrip("-*●◦•·▪▸►»>|├└│─ ")
+            cleaned = cleaned.strip()
+            if not cleaned:
+                continue
+            lower = cleaned.lower()
+            # Skip header/footer/empty-state lines
+            if lower.startswith(("agent", "available", "no agent", "name", "id", "command")):
+                continue
+            # Extract the first word as the likely agent name
+            first_word = cleaned.split()[0].rstrip(".,:;")
+            if first_word:
+                names.add(first_word)
+        return names if names else None
+    except Exception:
+        return None
+
+
+def cmd_agent_discovery(args):
+    """Validate OpenCode agent discovery paths.
+
+    Checks performed:
+      1. Any discovered agent name containing ".bak."
+      2. Any discovered agent beginning with "Runtime/" or "runtime/"
+      3. Internal prompt fragments appearing as agents
+      4. All 7 Heidi-managed agents are present
+      5. Native agents (build, plan) are preserved
+      6. No duplicate Heidi agents across discovery paths
+      7. No backup folders exist under discovery paths
+      8. No Runtime/ or runtime/ directories exist in discovery paths
+    """
+    config_dir = os.environ.get(
+        "OPENCODE_CONFIG_DIR",
+        os.path.join(os.path.expanduser("~"), ".config", "opencode"),
+    )
+    primary_path = Path(config_dir) / "agents"
+    project_path = Path(os.getcwd()) / ".opencode" / "agents"
+    discovery_paths = [p for p in [primary_path, project_path] if p.is_dir()]
+
+    failures = []
+
+    # ── Gather discovered agents ────────────────────────────────
+    # Level 0: direct *.md files  →  agent name = stem
+    # Level 1: *.md in subdirs    →  agent name = "subdir/stem"
+    discovered = {}  # agent_name → [full_path, ...]
+
+    for dp in discovery_paths:
+        for md_file in dp.glob("*.md"):
+            discovered.setdefault(md_file.stem, []).append(str(md_file))
+        for subdir in dp.iterdir():
+            if not subdir.is_dir():
+                continue
+            for md_file in subdir.glob("*.md"):
+                name = f"{subdir.name}/{md_file.stem}"
+                discovered.setdefault(name, []).append(str(md_file))
+
+    # ── Check 1: Backup agents (.bak.) ─────────────────────────
+    backup_agents = sorted(n for n in discovered if ".bak." in n)
+
+    # ── Check 2: Runtime-prefixed agents ───────────────────────
+    runtime_prefixed = sorted(
+        n for n in discovered if n.startswith(("Runtime/", "runtime/"))
+    )
+
+    # ── Check 3: Internal prompt fragments exposed ─────────────
+    runtime_fragments_exposed = sorted(
+        n for n in discovered if n in RUNTIME_FRAGMENTS
+    )
+
+    # ── Check 4: All 7 Heidi agents present ────────────────────
+    missing_heidi = sorted(HEIDI_AGENTS - set(discovered.keys()))
+
+    # ── Check 5: Native agents preserved ───────────────────────
+    missing_native = sorted(NATIVE_AGENTS - set(discovered.keys()))
+
+    # ── Check 6: Duplicate Heidi agents ────────────────────────
+    duplicate_heidi = sorted(
+        a for a in HEIDI_AGENTS if len(discovered.get(a, [])) > 1
+    )
+
+    # ── Check 7: Backup folders in discovery paths ─────────────
+    backup_dirs = []
+    for dp in discovery_paths:
+        for item in dp.iterdir():
+            if item.is_dir() and (".bak." in item.name or item.name.endswith(".bak")):
+                backup_dirs.append(str(item))
+
+    # ── Check 8: Runtime directories in discovery paths ────────
+    runtime_dirs = []
+    for dp in discovery_paths:
+        for rt_name in ("Runtime", "runtime"):
+            rt_dir = dp / rt_name
+            if rt_dir.is_dir():
+                runtime_dirs.append(str(rt_dir))
+
+    # ── Build failure list ─────────────────────────────────────
+    for name in backup_agents:
+        failures.append(f"Backup file exposed as agent: {name}")
+    for name in runtime_prefixed:
+        failures.append(f"Runtime-prefixed agent discovered: {name}")
+    for name in runtime_fragments_exposed:
+        failures.append(f"Runtime prompt fragment exposed as agent: {name}")
+    if missing_heidi:
+        failures.append(f"Missing Heidi agent(s): {', '.join(missing_heidi)}")
+    if missing_native:
+        if is_opencode_available():
+            failures.append(f"Missing native agent(s): {', '.join(missing_native)}")
+    for name in duplicate_heidi:
+        failures.append(f"Duplicate Heidi agent: {name}")
+    for d in backup_dirs:
+        failures.append(f"Backup folder in discovery path: {d}")
+    for d in runtime_dirs:
+        failures.append(f"Runtime directory in discovery path: {d}")
+
+    # ── Output ─────────────────────────────────────────────────
+    print(f"Agent discovery path: {primary_path}")
+    print(f"Managed Heidi agents: {len(HEIDI_AGENTS)}")
+    print(f"Runtime fragments exposed: {len(runtime_fragments_exposed)}")
+    print(f"Backup agents exposed: {len(backup_agents)}")
+    print(f"Duplicate agents: {len(duplicate_heidi)}")
+    print(f"Build preserved: {'PASS' if 'build' in discovered else 'FAIL'}")
+    print(f"Plan preserved: {'PASS' if 'plan' in discovered else 'FAIL'}")
+
+    # ── Additional user agents (tolerate but list) ─────────────
+    known = HEIDI_AGENTS | NATIVE_AGENTS | RUNTIME_FRAGMENTS
+    user_agents = set(discovered.keys()) - known - set(backup_agents)
+    # Also exclude runtime-prefixed from user list — they were already flagged
+    user_agents -= set(runtime_prefixed)
+    if user_agents:
+        print(f"Additional user agents: {', '.join(sorted(user_agents))}")
+
+    # ── OpenCode cross-validation ──────────────────────────────
+    if is_opencode_available():
+        oc_agents = _get_opencode_agent_list()
+        if oc_agents is not None:
+            fs_set = set(discovered.keys())
+            fs_only = fs_set - oc_agents
+            oc_only = oc_agents - fs_set
+            if fs_only:
+                print(f"Filesystem agents not in opencode list: {', '.join(sorted(fs_only))}")
+            if oc_only:
+                print(f"OpenCode agents not in filesystem: {', '.join(sorted(oc_only))}")
+
+    # ── Status ─────────────────────────────────────────────────
+    if failures:
+        for f in failures:
+            print(f"FAIL: {f}")
+        print("Status: FAIL")
+        return 1
+    else:
+        print("Status: PASS")
+        return 0
+
+
+# ──────────────────────────────────────────────────────────────────
 # CLI entry point
 # ──────────────────────────────────────────────────────────────────
 
@@ -352,6 +540,8 @@ def main():
 
     p_disc = sub.add_parser("discover", help="Discover OpenCode runtime capabilities")
 
+    p_ad = sub.add_parser("agent-discovery", help="Validate agent discovery paths")
+
     args = parser.parse_args()
 
     if args.command == "native-prompt":
@@ -360,6 +550,8 @@ def main():
         sys.exit(cmd_validate(args))
     elif args.command == "discover":
         sys.exit(cmd_discover(args))
+    elif args.command == "agent-discovery":
+        sys.exit(cmd_agent_discovery(args))
 
 
 if __name__ == "__main__":

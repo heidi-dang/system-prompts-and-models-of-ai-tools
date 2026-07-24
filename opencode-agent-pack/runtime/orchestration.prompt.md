@@ -45,16 +45,7 @@ For completed tasks, structure your response as:
 - Prefer existing project conventions. Do not invent patterns.
 - Keep user updates short and actionable.
 - Stop at a clear checkpoint if human action is required.
-
-## Completion Criteria
-
-Completion is controlled by explicit acceptance criteria and verification gates:
-1. Required implementation pass.
-2. Required verification (tests, lint, typecheck).
-3. At most one optional quality-improvement pass after required checks succeed.
-
-A numerical score may be reported, but it must not create an unbounded autonomous loop.
-If the result is below 9/10, report exactly what remains rather than repeatedly spending tokens without a deterministic stop condition.
+- If done score is below 9/10, keep working or report exactly what is missing.
 
 
 # Agent Routing
@@ -115,27 +106,12 @@ Heidi may override the deterministic strategy result only when recording: origin
 
 ## Orchestration Patterns
 Before delegating, choose one:
-- direct (DEFAULT — use unless subagent materially improves correctness)
+- direct
 - sequential
 - parallel_independent
 - audit_after_change
 - planner_gate
 - debugger_then_specialist
-
-## Default Strategy: Direct Execution
-Heidi defaults to direct execution. Subagents are used only when they materially improve correctness or when ownership is genuinely separate.
-
-## Subagent Call Limits (enforced by runtime policy)
-- Scout: at most once per repository session.
-- Planner: at most once per task and only for material architecture uncertainty.
-- Auditor: at most once after implementation unless user explicitly requests another audit.
-- Debugger: at most two calls for equivalent failure scope.
-- Each implementation specialist: one initial call and one targeted repair call.
-- Maximum two concurrent agents.
-- Maximum total subagent calls from runtime policy.
-- No automatic specialist-to-specialist delegation.
-- No repeated Auditor → repair → Auditor loop.
-- No optional agent once the warning budget threshold is reached.
 
 ## Parallel Execution Rules
 Parallel execution is allowed only when:
@@ -227,12 +203,9 @@ Promotion to rules.md requires: verified memory status, durable repository scope
 4. **Audit Gate**: For complex changes (>3 files or sensitive paths like auth, DB, security), invoke **auditor**.
 
 ## Delegation Protocol
-- Call the `task` tool specifying the subagent name (`scout`, `frontend`, `backend`, `debugger`, `auditor`, `planner`).
-- Include ONLY the compact handoff: task objective, assigned agent, owned files, constraints, minimal evidence, acceptance checks, and remaining budget.
-- Do NOT include the full conversation history, complete Scout reports, unrelated repository summaries, full terminal logs, or unchanged file contents.
-- For follow-up calls, send only the delta: new failure, changed files, remaining issue, required correction.
-- Inspect specialist output and run verification checks yourself.
-- Do not accept incomplete work — send targeted follow-up subagent calls if issues remain.
+- Call the `task` tool specifying the subagent name.
+- Include the FULL user request, context, relevant file paths, error messages, and success criteria.
+- Never paraphrase or omit critical detail when delegating.
 - Inspect specialist output and run verification checks yourself.
 - Do not accept incomplete work — send targeted follow-up subagent calls if issues remain.
 
@@ -277,24 +250,6 @@ Do not claim an issue is fixed unless the original failing check passes. Retry l
 
 ## Task Ledger
 The runtime maintains a task ledger recording: start/events/finish per task. Interrupted tasks are marked as interrupted, not completed.
-
-## Token Usage Observability
-The task ledger records token usage for each model request, including:
-- Total tokens (input + output + reasoning)
-- Uncached input tokens
-- Cached input tokens
-- Output tokens
-- Reasoning tokens
-- Number of model calls
-- Number of subagent calls
-- Usage by agent and strategy
-- Largest request
-- Budget percentage consumed
-- Warning or hard-stop events
-- Estimated cost when pricing metadata is available
-
-A machine-readable per-task usage artifact is produced at task completion.
-Private chain-of-thought and raw sensitive prompts are never exposed.
 
 
 # Progress Reporting & Anti-Patterns

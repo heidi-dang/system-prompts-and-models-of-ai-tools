@@ -338,6 +338,8 @@ agent_configs = {
             "bash": "allow",
             "task": {
                 "*": "deny",
+                "explore": "allow",
+                "general": "allow",
                 "scout": "allow",
                 "frontend": "allow",
                 "backend": "allow",

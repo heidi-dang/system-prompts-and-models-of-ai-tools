@@ -21,7 +21,7 @@ Before acting, briefly assess:
 # Task Lifecycle
 1. **INTAKE**: Understand goal & assess risk. (Do not edit yet).
 2. **ROUTE**: Choose fast path, direct execution, or delegate.
-3. **CONTEXT**: Gather minimal required files. Clip long command outputs (`head`/`tail`).
+3. **CONTEXT**: Gather minimal required files. Read `.heidi/commands.md` for project commands. NEVER hallucinate commands. Clip long command outputs (`head`/`tail`).
 4. **EXECUTE**: Apply targeted changes. No unrelated refactoring.
 5. **VERIFY**: Run checks (`lint`, `typecheck`, `test`, `build`). If checks fail, execute at most 1 repair cycle before reporting status.
 6. **COMPLETE**: Report concise result with evidence.
@@ -49,7 +49,7 @@ Before editing code:
 3. **Assumptions**: Verify non-null / error-handling assumptions remain intact.
 
 # Context & Token Efficiency Rules
-1. **Log Clipping**: NEVER output unclipped terminal logs into context. Pipe long commands: `command | tail -n 30` or `grep`.
+1. **Log Clipping**: NEVER output unclipped terminal logs into context. Pipe long commands: `command | tail -n 30` or `grep`. When reading `.heidi/` log files (like `memory.jsonl`), ALWAYS use `tail -n 100`. Never read the full file.
 2. **Subagent Briefing**: Send subagents compact briefs (objective, assigned files, constraints, acceptance checks). Never send full history or raw logs.
 3. **Subagent Summarization**: Require subagents to return concise summaries (<150 words).
 4. **Batching**: Batch independent tool calls in parallel within the same turn.

@@ -21,6 +21,8 @@ Options:
   --doctor              Print runtime discovery diagnostics
   --dry-run             Show what would be installed without doing it
   --diff                Show diff between installed and source agents
+  --verify              Verify installed agents strictly match source (exits 1 if mismatch)
+  --rotate-logs         Truncates .heidi/*.jsonl files to last 500 lines
   --config-global       Update global opencode.json with agent definitions
   --config-project      Update project opencode.json with agent definitions
   --default AGENT       Set default_agent in opencode.json (requires --config-global or --config-project)
@@ -59,6 +61,8 @@ while [[ $# -gt 0 ]]; do
     --doctor) MODE="doctor"; shift ;;
     --dry-run) MODE="dry-run"; shift ;;
     --diff) MODE="diff"; shift ;;
+    --verify) MODE="verify"; shift ;;
+    --rotate-logs) MODE="rotate-logs"; shift ;;
     --config-global) DO_CONFIG_GLOBAL=true; shift ;;
     --config-project) DO_CONFIG_PROJECT=true; shift ;;
     --init-rules) MODE="init-rules"; shift ;;
@@ -461,6 +465,71 @@ diff_mode() {
 }
 
 # ============================================================
+# VERIFY MODE
+# ============================================================
+verify_mode() {
+  echo "=== Verify: Source vs Installed ==="
+  local any_diff=false
+  for target_dir in "$OFFICIAL_GLOBAL" "$OFFICIAL_PROJECT"; do
+    if [ ! -d "$target_dir" ]; then
+      continue
+    fi
+    for agent in "${AGENT_NAMES[@]}"; do
+      src="$AGENT_SRC/$agent.md"
+      dst="$target_dir/$agent.md"
+      if [ ! -f "$src" ]; then
+        continue
+      fi
+      if [ ! -f "$dst" ]; then
+        echo "FAIL: $agent.md is NOT INSTALLED at $target_dir"
+        any_diff=true
+        continue
+      fi
+      if ! diff -q "$src" "$dst" > /dev/null 2>&1; then
+        echo "FAIL: $agent.md ($target_dir) DIFFERS from source."
+        any_diff=true
+      fi
+    done
+  done
+  if [ "$any_diff" = true ]; then
+    echo "Verification failed. Run ./agent.sh --both to fix."
+    exit 1
+  else
+    echo "Verification passed. All agents match perfectly."
+  fi
+}
+
+# ============================================================
+# ROTATE LOGS MODE
+# ============================================================
+rotate_logs_mode() {
+  echo "=== Rotating .heidi Logs ==="
+  local log_dir="$(pwd)/.heidi"
+  if [ ! -d "$log_dir" ]; then
+    echo "No .heidi directory found in $(pwd)."
+    exit 0
+  fi
+  local rotated=false
+  for log_file in "$log_dir"/*.jsonl; do
+    if [ -f "$log_file" ]; then
+      local lines=$(wc -l < "$log_file" | tr -d ' ' 2>/dev/null || echo 0)
+      if [ "$lines" -gt 500 ]; then
+        echo "Rotating $log_file ($lines lines)..."
+        tail -n 500 "$log_file" > "$log_file.tmp"
+        mv "$log_file.tmp" "$log_file"
+        echo "Truncated to last 500 lines."
+        rotated=true
+      else
+        echo "Skipping $log_file ($lines lines is <= 500)."
+      fi
+    fi
+  done
+  if [ "$rotated" = false ]; then
+    echo "No logs needed rotation."
+  fi
+}
+
+# ============================================================
 # INIT RULES MODE
 # ============================================================
 init_rules_mode() {
@@ -513,6 +582,14 @@ case "${MODE:-global}" in
     ;;
   diff)
     diff_mode
+    exit 0
+    ;;
+  verify)
+    verify_mode
+    exit 0
+    ;;
+  rotate-logs)
+    rotate_logs_mode
     exit 0
     ;;
   init-rules)

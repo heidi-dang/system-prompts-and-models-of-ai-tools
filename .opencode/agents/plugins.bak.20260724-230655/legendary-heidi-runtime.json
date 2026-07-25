@@ -1,0 +1,30 @@
+{
+  "version": "1.4.0",
+  "enabled": true,
+  "native_prompt_composition": {
+    "mode": "append",
+    "preserve_native": true,
+    "validate_on_startup": true
+  },
+  "orchestration": {
+    "prompt_path": "opencode-agent-pack/runtime/prompts",
+    "auto_context_injection": true,
+    "auto_strategy_selection": true,
+    "auto_task_ledger": true
+  },
+  "modules": {
+    "core": true,
+    "routing": true,
+    "orchestration": true,
+    "memory": true,
+    "verification": true,
+    "resilience": true,
+    "reporting": true,
+    "fast_path": true
+  },
+  "prompt_size_limits": {
+    "max_prompt_size": 16000,
+    "warn_threshold": 12000,
+    "hard_fail_threshold": 20000
+  }
+}

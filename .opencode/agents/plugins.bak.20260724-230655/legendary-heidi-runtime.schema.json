@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Legendary Heidi Runtime Plugin Configuration",
+  "type": "object",
+  "properties": {
+    "version": { "type": "string" },
+    "enabled": { "type": "boolean", "default": true },
+    "native_prompt_composition": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["append", "prepend", "replace"],
+          "default": "append"
+        },
+        "preserve_native": { "type": "boolean", "default": true },
+        "validate_on_startup": { "type": "boolean", "default": true }
+      }
+    },
+    "orchestration": {
+      "type": "object",
+      "properties": {
+        "prompt_path": { "type": "string" },
+        "auto_context_injection": { "type": "boolean", "default": true },
+        "auto_strategy_selection": { "type": "boolean", "default": true },
+        "auto_task_ledger": { "type": "boolean", "default": true }
+      }
+    },
+    "modules": {
+      "type": "object",
+      "properties": {
+        "core": { "type": "boolean", "default": true },
+        "routing": { "type": "boolean", "default": true },
+        "orchestration": { "type": "boolean", "default": true },
+        "memory": { "type": "boolean", "default": true },
+        "verification": { "type": "boolean", "default": true },
+        "resilience": { "type": "boolean", "default": true },
+        "reporting": { "type": "boolean", "default": true },
+        "fast_path": { "type": "boolean", "default": true }
+      }
+    },
+    "prompt_size_limits": {
+      "type": "object",
+      "properties": {
+        "max_prompt_size": { "type": "integer", "default": 16000 },
+        "warn_threshold": { "type": "integer", "default": 12000 },
+        "hard_fail_threshold": { "type": "integer", "default": 20000 }
+      }
+    }
+  }
+}

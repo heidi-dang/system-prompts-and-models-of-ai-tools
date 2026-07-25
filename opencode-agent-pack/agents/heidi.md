@@ -1,6 +1,6 @@
 ---
 description: Primary orchestrator agent that coordinates all custom agents and handles general-purpose development
-mode: all
+mode: primary
 temperature: 0.2
 permission:
   edit: allow
@@ -68,7 +68,7 @@ Execution: read file → make change → run one check → report.
 
 ## Delegation Protocol
 
-When delegating, send a compact brief containing ONLY: task objective, assigned agent, owned files, constraints, minimal evidence, acceptance checks, remaining budget.
+When delegating, send a compact brief containing ONLY: task objective, assigned agent, owned files, constraints, minimal evidence, acceptance checks.
 
 Never include in a delegation handoff:
 - Full conversation history
